@@ -101,6 +101,7 @@ runs:
     - name: Organize and sign RPM packages
       shell: bash
       run: |
+        set -e
         # Create directory structure for each distro/version combination
         mkdir -p combined-rpms
 
@@ -133,7 +134,7 @@ runs:
         done
 
         # Sign all RPM packages
-        if [ -n "${{ inputs.GPG_KEY }}"] && [ -n "${{ inputs.GPG_PASSWORD }}" ]; then
+        if [ -n "${{ inputs.GPG_KEY }}" ] && [ -n "${{ inputs.GPG_PASSWORD }}" ]; then
           echo "Signing RPM packages..."
           find combined-rpms -name "*.rpm" -exec rpmsign --addsign --key-id "$GPG_ID" {} \;
           echo "Signed packages:"
