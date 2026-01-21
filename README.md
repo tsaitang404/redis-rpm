@@ -10,7 +10,7 @@ This repository provides tools and configurations to build and package Redis Ope
   - RedisTimeSeries
   - ReJSON
 - Multi-architecture support (amd64/arm64)
-- RPM packages for Rocky Linux 8/9 (compatible with RHEL 8/9, AlmaLinux 8/9)
+- RPM packages for Rocky Linux 8/9/10 (compatible with RHEL 8/9/10, AlmaLinux 8/9/10)
 
 ## Prerequisites
 
@@ -22,7 +22,7 @@ This repository provides tools and configurations to build and package Redis Ope
 
 ### For Installing RPMs
 
-- Rocky Linux 8/9, RHEL 8/9, AlmaLinux 8/9, or other compatible distributions
+- Rocky Linux 8/9/10, RHEL 8/9/10, AlmaLinux 8/9/10, or other compatible distributions
 - Systemd
 
 ## Installation
@@ -69,7 +69,8 @@ The repository includes GitHub Actions workflows to automate the build process. 
 │   └── sentinel.conf            # Redis Sentinel configuration
 ├── dockerfiles/                 # Docker build environments
 │   ├── Dockerfile.rockylinux8   # Rocky Linux 8 build environment
-│   └── Dockerfile.rockylinux9   # Rocky Linux 9 build environment
+│   ├── Dockerfile.rockylinux9   # Rocky Linux 9 build environment
+│   └── Dockerfile.rockylinux10  # Rocky Linux 10 build environment
 ├── scripts/                     # RPM package scripts
 │   ├── postinstall.sh           # Post-install configuration
 │   ├── postremove.sh            # Post-removal cleanup

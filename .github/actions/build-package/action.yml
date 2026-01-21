@@ -80,8 +80,13 @@ runs:
       shell: docker-builder {0}
       run: |
         set -e
-        # Source gcc-toolset-13 environment
-        source /etc/profile.d/gcc-toolset-13.sh
+        # Source gcc-toolset environment (version depends on distro)
+        if [ -f /etc/profile.d/gcc-toolset-15.sh ]; then
+          source /etc/profile.d/gcc-toolset-15.sh
+        # Fallback for Rocky Linux 8/9
+        elif [ -f /etc/profile.d/gcc-toolset-13.sh ]; then
+          source /etc/profile.d/gcc-toolset-13.sh
+        fi
         export BUILD_WITH_MODULES=yes
         export INSTALL_RUST_TOOLCHAIN=yes
         export DISABLE_WERRORS=yes
