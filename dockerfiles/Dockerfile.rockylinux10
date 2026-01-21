@@ -33,7 +33,10 @@ RUN echo '[goreleaser]\nname=GoReleaser\nbaseurl=https://repo.goreleaser.com/yum
     python3 -m venv /opt/venv; \
     \
     cp /opt/rh/gcc-toolset-13/enable /etc/profile.d/gcc-toolset-13.sh; \
-    echo "source /etc/profile.d/gcc-toolset-13.sh" >> /etc/bashrc
+    echo "source /etc/profile.d/gcc-toolset-13.sh" >> /etc/bashrc; \
+    \
+    dnf clean all && \
+    rm -rf /var/cache/dnf;
 
 # Install CMake
 COPY install/install_cmake.sh /tmp/
