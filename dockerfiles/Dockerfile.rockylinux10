@@ -10,8 +10,8 @@ RUN echo '[goreleaser]\nname=GoReleaser\nbaseurl=https://repo.goreleaser.com/yum
     xz \
     wget \
     which \
-    gcc-toolset-13-gcc \
-    gcc-toolset-13-gcc-c++ \
+    gcc-toolset-15-gcc \
+    gcc-toolset-15-gcc-c++ \
     clang \
     git \
     make \
@@ -32,8 +32,8 @@ RUN echo '[goreleaser]\nname=GoReleaser\nbaseurl=https://repo.goreleaser.com/yum
     # Python venv
     python3 -m venv /opt/venv; \
     \
-    cp /opt/rh/gcc-toolset-13/enable /etc/profile.d/gcc-toolset-13.sh; \
-    echo "source /etc/profile.d/gcc-toolset-13.sh" >> /etc/bashrc; \
+    cp /usr/lib/gcc-toolset/15-env.source /etc/profile.d/gcc-toolset-15.sh; \
+    echo "source /etc/profile.d/gcc-toolset-15.sh" >> /etc/bashrc; \
     \
     dnf clean all && \
     rm -rf /var/cache/dnf;
