@@ -9,7 +9,7 @@ inputs:
     description: "Distribution name (e.g., rockylinux, almalinux)"
     required: true
   distro_version:
-    description: "Distribution version (e.g., 8, 9)"
+    description: "Distribution version (e.g., 8, 9, 10)"
     required: true
   platform:
     description: "Platform/architecture (e.g., amd64, arm64)"
