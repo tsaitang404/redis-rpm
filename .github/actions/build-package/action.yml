@@ -92,6 +92,8 @@ runs:
         export DISABLE_WERRORS=yes
         export BUILD_TLS=yes
         export USE_SYSTEMD=yes
+        # Override RediSearch's new LTO=1 default; toolchain support TBD.
+        export LTO=0
 
         if [ "${{ steps.version.outputs.VERSION }}" = "unstable" ]; then
           # Clone Redis unstable branch instead of downloading release tarball
