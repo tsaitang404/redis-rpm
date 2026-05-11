@@ -92,8 +92,15 @@ runs:
         export DISABLE_WERRORS=yes
         export BUILD_TLS=yes
         export USE_SYSTEMD=yes
-        # Override RediSearch's new LTO=1 default; toolchain support TBD.
-        export LTO=0
+        # Enable RediSearch LTO only where LLVM 21 is available (Rocky 10).
+        # Rocky 8/9 lack libstdc++ with GLIBCXX_3.4.30+ that upstream LLVM 21
+        # binaries require, so keep LTO=0 there.
+        if [ -x /opt/llvm/bin/clang-21 ]; then
+          export LTO=1
+          export PATH=/opt/llvm/bin:$PATH
+        else
+          export LTO=0
+        fi
 
         if [ "${{ steps.version.outputs.VERSION }}" = "unstable" ]; then
           # Clone Redis unstable branch instead of downloading release tarball
