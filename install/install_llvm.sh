@@ -2,9 +2,9 @@
 # Install LLVM 21 for RediSearch's cross-language (C/Rust) LTO build.
 # LLVM has no dnf repo, so we use the official upstream tarball.
 #
-# Rocky 10 only: prebuilt LLVM 21 binaries need GLIBCXX_3.4.30+; Rocky 10
-# ships it (3.4.32). Rocky 8/9 don't — gcc-toolset ships compile-time headers
-# only, no newer libstdc++.so.6 runtime, so there is nothing to vendor.
+# Rocky 10 only: ships libstdc++ with GLIBCXX_3.4.32 which satisfies the
+# GLIBCXX_3.4.30+ requirement of the prebuilt LLVM 21 binaries.
+# Rocky 8 and Rocky 9 are not supported (incompatible libstdc++ at runtime).
 
 set -euo pipefail
 
