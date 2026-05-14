@@ -83,7 +83,8 @@ runs:
         # Source gcc-toolset environment (version depends on distro)
         if [ -f /etc/profile.d/gcc-toolset-15.sh ]; then
           source /etc/profile.d/gcc-toolset-15.sh
-        # Fallback for Rocky Linux 8/9
+        elif [ -f /etc/profile.d/gcc-toolset-14.sh ]; then
+          source /etc/profile.d/gcc-toolset-14.sh
         elif [ -f /etc/profile.d/gcc-toolset-13.sh ]; then
           source /etc/profile.d/gcc-toolset-13.sh
         fi
@@ -92,10 +93,10 @@ runs:
         export DISABLE_WERRORS=yes
         export BUILD_TLS=yes
         export USE_SYSTEMD=yes
-        # Enable RediSearch LTO only where LLVM 21 is available (Rocky 10).
-        # Rocky 8/9 lack libstdc++ with GLIBCXX_3.4.30+ that upstream LLVM 21
-        # binaries require, so keep LTO=0 there.
-        if [ -x /opt/llvm/bin/clang-21 ]; then
+        # Enable RediSearch LTO only where our LLVM toolchain is installed.
+        # Rocky 8 lacks a compatible libstdc++ runtime for the prebuilt LLVM
+        # binaries so it has no /opt/llvm; Rocky 9 and 10 do.
+        if [ -x /opt/llvm/bin/clang ]; then
           export LTO=1
           export PATH=/opt/llvm/bin:$PATH
         else
