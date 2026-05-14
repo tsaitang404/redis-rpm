@@ -39,8 +39,22 @@ RUN echo '[goreleaser]\nname=GoReleaser\nbaseurl=https://repo.goreleaser.com/yum
 COPY install/install_cmake.sh /tmp/
 RUN bash /tmp/install_cmake.sh
 
+# Rocky 9's system libstdc++ (GCC 11, GLIBCXX_3.4.28) is too old for the
+# prebuilt LLVM 21 binaries (need 3.4.30+). Pull a newer libstdc++ from
+# Fedora 43 which provides GLIBCXX_3.4.34 and is built against a compatible
+RUN dnf install -y \
+    --repofrompath=fedora,'https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/$basearch/os/' \
+    --setopt=fedora.gpgcheck=0 \
+    --disablerepo='*' --enablerepo=fedora \
+    libstdc++ && \
+    dnf clean all
+
+# Install LLVM 21 for RediSearch LTO (Rocky 9 + Rocky 10; see install_llvm.sh).
+COPY install/install_llvm.sh /tmp/
+RUN bash /tmp/install_llvm.sh
+
 # Set environment
-ENV PATH="/usr/local/bin:/opt/venv/bin:${PATH}"
+ENV PATH="/opt/llvm/bin:/usr/local/bin:/opt/venv/bin:${PATH}"
 WORKDIR /build
 
 # Default command
