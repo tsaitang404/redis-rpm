@@ -1,0 +1,229 @@
+name: Test LTO - Rocky Linux Only
+
+# Focused workflow for iterating on LTO / builder-image changes for Rocky Linux.
+# Only builds and tests Rocky Linux 8/9/10 — AlmaLinux and CentOS Stream are
+# intentionally omitted to keep CI fast during development.
+#
+# Extra jobs compared to the main rpm.yml workflow:
+#   verify-container  — inspects each builder image (gcc version, LLVM, libstdc++)
+#   verify-binaries   — checks GLIBC/GLIBCXX symbol requirements of the built RPM
+#                       and fails if they exceed what the target distro ships
+#
+# Once Rocky Linux passes cleanly, re-enable AlmaLinux/CentOS in rpm.yml.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - test-lto-rockylinux
+
+jobs:
+  # ── 1. Build the builder containers ────────────────────────────────────────
+  build-containers:
+    name: Build Builder Containers
+    uses: ./.github/workflows/build_workflow_containers.yaml
+
+  # ── 2. Verify builder container environment ─────────────────────────────────
+  # Quick sanity check: confirms gcc version, LLVM presence, and the max
+  # GLIBCXX version available in the container's libstdc++.
+  verify-container:
+    name: Verify Builder (${{ matrix.distro }}${{ matrix.distro_version }}-amd64)
+    needs: build-containers
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {distro: rockylinux, distro_version: "10"}
+          - {distro: rockylinux, distro_version: "9"}
+          - {distro: rockylinux, distro_version: "8"}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ github.token }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Inspect builder image
+        run: |
+          IMAGE="ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.distro_version }}"
+          echo "Pulling $IMAGE..."
+          docker pull "$IMAGE"
+
+          echo ""
+          echo "=== Compiler versions ==="
+          docker run --rm "$IMAGE" bash -lc "gcc --version | head -1; g++ --version | head -1" 2>/dev/null || \
+          docker run --rm "$IMAGE" bash -c "source /etc/bashrc 2>/dev/null || true; gcc --version | head -1; g++ --version | head -1"
+
+          echo ""
+          echo "=== LLVM / LTO gate ==="
+          docker run --rm "$IMAGE" bash -c "
+            if [ -x /opt/llvm/bin/clang ]; then
+              /opt/llvm/bin/clang --version | head -1
+              echo 'LTO gate: ENABLED (LTO=1)'
+            else
+              echo 'No /opt/llvm/bin/clang found'
+              echo 'LTO gate: DISABLED (LTO=0)'
+            fi
+          "
+
+          echo ""
+          echo "=== libstdc++ GLIBCXX range ==="
+          docker run --rm "$IMAGE" bash -c "
+            echo -n 'Min: '; strings /lib64/libstdc++.so.6 | grep -oE 'GLIBCXX_3\.[0-9]+\.[0-9]+' | sort -V | head -1
+            echo -n 'Max: '; strings /lib64/libstdc++.so.6 | grep -oE 'GLIBCXX_3\.[0-9]+\.[0-9]+' | sort -V | tail -1
+          "
+
+          echo ""
+          echo "=== System glibc ==="
+          docker run --rm "$IMAGE" bash -c "ldd --version | head -1"
+
+  # ── 3. Build the RPM packages (Rocky Linux only) ────────────────────────────
+  build-package:
+    name: Build RPM (${{ matrix.distro }}${{ matrix.distro_version }}-${{ matrix.platform }})
+    needs: build-containers
+    runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu24-arm64-2-8' || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {distro: rockylinux, distro_version: "10", platform: amd64}
+          - {distro: rockylinux, distro_version: "10", platform: arm64}
+          - {distro: rockylinux, distro_version: "9",  platform: amd64}
+          - {distro: rockylinux, distro_version: "9",  platform: arm64}
+          - {distro: rockylinux, distro_version: "8",  platform: amd64}
+          - {distro: rockylinux, distro_version: "8",  platform: arm64}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build package
+        uses: ./.github/actions/build-package
+        with:
+          distro: ${{ matrix.distro }}
+          distro_version: ${{ matrix.distro_version }}
+          platform: ${{ matrix.platform }}
+          release_tag: unstable
+
+  # ── 4. Verify binary symbol requirements ────────────────────────────────────
+  # Extracts the RPM and checks that redis-server and every *.so module only
+  # use GLIBC/GLIBCXX symbols that the target distro actually ships.
+  # Fails fast if a newer glibc or libstdc++ contaminated the build.
+  verify-binaries:
+    name: Verify Binaries (${{ matrix.distro }}${{ matrix.distro_version }}-amd64)
+    needs: build-package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # max_glibc / max_glibcxx = highest version the distro ships natively
+          - {distro: rockylinux, distro_version: "10", artifact: rpm-rockylinux10-amd64, max_glibc: "2.38", max_glibcxx: "3.4.32"}
+          - {distro: rockylinux, distro_version: "9",  artifact: rpm-rockylinux9-amd64,  max_glibc: "2.34", max_glibcxx: "3.4.29"}
+          - {distro: rockylinux, distro_version: "8",  artifact: rpm-rockylinux8-amd64,  max_glibc: "2.28", max_glibcxx: "3.4.25"}
+    steps:
+      - name: Download RPM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./rpm
+
+      - name: Check binary symbol requirements
+        run: |
+          IMAGE="${{ matrix.distro_version == '10' && 'rockylinux/rockylinux:10' || format('{0}:{1}', matrix.distro, matrix.distro_version) }}"
+          docker run --rm \
+            --platform linux/amd64 \
+            -v "$PWD/rpm:/rpm:ro" \
+            "$IMAGE" bash -c '
+              set -euo pipefail
+              dnf install -y --quiet cpio binutils 2>/dev/null | tail -2
+
+              RPM=$(ls /rpm/*.rpm | head -1)
+              echo "Checking: $(basename $RPM)"
+
+              mkdir -p /tmp/ex && cd /tmp/ex
+              rpm2cpio "$RPM" | cpio -idm --quiet 2>/dev/null
+
+              FAILED=0
+
+              check_binary() {
+                local f="$1" label="$2" max_glibc="$3" max_glibcxx="$4"
+                echo ""
+                echo "--- $label ---"
+                local mg mgxx
+                mg=$(nm -D "$f" 2>/dev/null | grep -oE "GLIBC_[0-9.]+" | sed "s/GLIBC_//" | sort -Vu | tail -1 || true)
+                mgxx=$(nm -D "$f" 2>/dev/null | grep -oE "GLIBCXX_[0-9.]+" | sed "s/GLIBCXX_//" | sort -Vu | tail -1 || true)
+                echo "  GLIBC  max required: ${mg:-none}"
+                echo "  GLIBCXX max required: ${mgxx:-none}"
+
+                if [ -n "$mg" ] && ! printf "%s\n%s\n" "$max_glibc" "$mg" | sort -V -C; then
+                  echo "  FAIL: requires GLIBC_$mg > platform max GLIBC_$max_glibc"
+                  FAILED=1
+                else
+                  echo "  GLIBC OK"
+                fi
+                if [ -n "$mgxx" ] && ! printf "%s\n%s\n" "$max_glibcxx" "$mgxx" | sort -V -C; then
+                  echo "  FAIL: requires GLIBCXX_$mgxx > platform max GLIBCXX_$max_glibcxx"
+                  FAILED=1
+                else
+                  [ -n "$mgxx" ] && echo "  GLIBCXX OK"
+                fi
+              }
+
+              for SO in redisearch.so redisbloom.so redistimeseries.so rejson.so; do
+                F=$(find . -name "$SO" | head -1)
+                [ -n "$F" ] && check_binary "$F" "$SO" "'"${{ matrix.max_glibc }}"'" "'"${{ matrix.max_glibcxx }}"'"
+              done
+
+              RS=$(find . -name redis-server | head -1)
+              [ -n "$RS" ] && check_binary "$RS" "redis-server" "'"${{ matrix.max_glibc }}"'" "'"${{ matrix.max_glibcxx }}"'"
+
+              echo ""
+              if [ "$FAILED" -eq 0 ]; then
+                echo "PASS: all binaries are compatible with ${{ matrix.distro }} ${{ matrix.distro_version }}"
+                echo "      (GLIBC <= ${{ matrix.max_glibc }}, GLIBCXX <= ${{ matrix.max_glibcxx }})"
+              else
+                echo "FAIL: binary compatibility check failed for ${{ matrix.distro }} ${{ matrix.distro_version }}"
+                exit 1
+              fi
+            '
+
+  # ── 5. Smoke-test the RPM on each Rocky Linux version ───────────────────────
+  # Uncomment AlmaLinux / CentOS Stream entries below once Rocky Linux passes.
+  run-smoke-tests:
+    name: Test RPM (${{ matrix.distro }}${{ matrix.distro_version }}-${{ matrix.platform }})
+    runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu24-arm64-2-8' || 'ubuntu-latest' }}
+    container:
+      image: "${{ matrix.distro_version == '10' && 'rockylinux/rockylinux:10' || format('{0}:{1}', matrix.distro, matrix.distro_version) }}"
+    needs: build-package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {distro: rockylinux, distro_version: "10", platform: amd64, test_artifact_name: rpm-rockylinux10-amd64}
+          - {distro: rockylinux, distro_version: "10", platform: arm64, test_artifact_name: rpm-rockylinux10-arm64}
+          - {distro: rockylinux, distro_version: "9",  platform: amd64, test_artifact_name: rpm-rockylinux9-amd64}
+          - {distro: rockylinux, distro_version: "9",  platform: arm64, test_artifact_name: rpm-rockylinux9-arm64}
+          - {distro: rockylinux, distro_version: "8",  platform: amd64, test_artifact_name: rpm-rockylinux8-amd64}
+          - {distro: rockylinux, distro_version: "8",  platform: arm64, test_artifact_name: rpm-rockylinux8-arm64}
+          # Uncomment to also test on AlmaLinux and CentOS Stream once Rocky Linux passes:
+          # - {distro: almalinux, distro_version: "10", platform: amd64, test_artifact_name: rpm-rockylinux10-amd64}
+          # - {distro: almalinux, distro_version: "10", platform: arm64, test_artifact_name: rpm-rockylinux10-arm64}
+          # - {distro: almalinux, distro_version: "9",  platform: amd64, test_artifact_name: rpm-rockylinux9-amd64}
+          # - {distro: almalinux, distro_version: "9",  platform: arm64, test_artifact_name: rpm-rockylinux9-arm64}
+          # - {distro: almalinux, distro_version: "8",  platform: amd64, test_artifact_name: rpm-rockylinux8-amd64}
+          # - {distro: almalinux, distro_version: "8",  platform: arm64, test_artifact_name: rpm-rockylinux8-arm64}
+          # - {distro: "quay.io/centos/centos", distro_version: "9", platform: amd64, test_artifact_name: rpm-rockylinux9-amd64}
+          # - {distro: "quay.io/centos/centos", distro_version: "9", platform: arm64, test_artifact_name: rpm-rockylinux9-arm64}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run smoke tests
+        uses: ./.github/actions/run-smoke-tests
+        with:
+          run_id: ${{ github.run_id }}
+          distro: ${{ matrix.distro }}
+          distro_version: ${{ matrix.distro_version }}
+          platform: ${{ matrix.platform }}
+          test_artifact_name: ${{ matrix.test_artifact_name }}
