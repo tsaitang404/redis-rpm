@@ -83,7 +83,8 @@ runs:
         # Source gcc-toolset environment (version depends on distro)
         if [ -f /etc/profile.d/gcc-toolset-15.sh ]; then
           source /etc/profile.d/gcc-toolset-15.sh
-        # Fallback for Rocky Linux 8/9
+        elif [ -f /etc/profile.d/gcc-toolset-14.sh ]; then
+          source /etc/profile.d/gcc-toolset-14.sh
         elif [ -f /etc/profile.d/gcc-toolset-13.sh ]; then
           source /etc/profile.d/gcc-toolset-13.sh
         fi
@@ -92,8 +93,15 @@ runs:
         export DISABLE_WERRORS=yes
         export BUILD_TLS=yes
         export USE_SYSTEMD=yes
-        # Override RediSearch's new LTO=1 default; toolchain support TBD.
-        export LTO=0
+        # Enable RediSearch LTO only where our LLVM toolchain is installed.
+        # Rocky 8 and 9 lacks a compatible libstdc++ runtime for the prebuilt LLVM
+        # binaries so it has no /opt/llvm; Rocky 10 does.
+        if [ -x /opt/llvm/bin/clang ]; then
+          export LTO=1
+          export PATH=/opt/llvm/bin:$PATH
+        else
+          export LTO=0
+        fi
 
         if [ "${{ steps.version.outputs.VERSION }}" = "unstable" ]; then
           # Clone Redis unstable branch instead of downloading release tarball

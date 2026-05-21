@@ -42,8 +42,12 @@ RUN echo '[goreleaser]\nname=GoReleaser\nbaseurl=https://repo.goreleaser.com/yum
 COPY install/install_cmake.sh /tmp/
 RUN bash /tmp/install_cmake.sh
 
+# Install LLVM 21 for RediSearch LTO (Rocky 10 only; see install_llvm.sh).
+COPY install/install_llvm.sh /tmp/
+RUN bash /tmp/install_llvm.sh
+
 # Set environment
-ENV PATH="/usr/local/bin:/opt/venv/bin:${PATH}"
+ENV PATH="/opt/llvm/bin:/usr/local/bin:/opt/venv/bin:${PATH}"
 WORKDIR /build
 
 # Default command
