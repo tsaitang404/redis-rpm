@@ -125,6 +125,15 @@ runs:
         fi
 
         # Build Redis
+        # On arm64, configure jemalloc with a 64 KiB max page size so the
+        # resulting binary runs on aarch64 hosts that use 64K pages (e.g.
+        # Rocky Linux 8 aarch64). Build runners are 4K-page, so without this
+        # jemalloc aborts with "Unsupported system page size" at startup.
+        # See https://github.com/redis/redis/issues/15185 and the side note
+        # in https://github.com/redis/redis/pull/11407.
+        if [ "${{ inputs.platform }}" = "arm64" ]; then
+          export JEMALLOC_CONFIGURE_OPTS="--with-lg-page=16"
+        fi
         make -j "$(nproc)" all
         make install PREFIX=/usr/local
         echo "Contents of /usr/local/lib/redis/modules/:"
