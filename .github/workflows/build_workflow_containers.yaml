@@ -67,9 +67,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ matrix.distro }}${{ matrix.distro_version }}
-            type=raw,value=${{ matrix.distro }}${{ matrix.distro_version }}-${{ github.sha }}
-            type=raw,value=${{ matrix.distro }}${{ matrix.distro_version }}-${{ matrix.platform }}
+            type=raw,value=${{ matrix.distro }}${{ matrix.distro_version }}-${{ github.sha }}-${{ matrix.platform }}
 
       - name: Build and push
         uses: docker/build-push-action@v7
@@ -116,10 +114,10 @@ jobs:
 
       - name: Merge manifests
         run: |
-          # Get unique distro+version combinations
           distro_version="${{ matrix.distro }}${{ matrix.distro_version }}"
+          sha="${{ github.sha }}"
 
-          # Create multi-arch manifest
-          docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${distro_version} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${distro_version}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${distro_version}-arm64
+          # Create SHA-pinned multi-arch manifest from the per-arch SHA tags
+          docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${distro_version}-${sha} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${distro_version}-${sha}-amd64 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${distro_version}-${sha}-arm64
