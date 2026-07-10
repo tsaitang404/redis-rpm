@@ -1,5 +1,8 @@
 FROM rockylinux:9
 
+ARG TARGETARCH
+ARG YQ_VERSION=v4.44.3
+
 # Install basic packages and development tools
 RUN echo '[goreleaser]\nname=GoReleaser\nbaseurl=https://repo.goreleaser.com/yum/\nenabled=1\ngpgcheck=0' > /etc/yum.repos.d/goreleaser.repo; \
     dnf clean all && \
@@ -28,6 +31,12 @@ RUN echo '[goreleaser]\nname=GoReleaser\nbaseurl=https://repo.goreleaser.com/yum
     autoconf \
     jq \
     systemd-devel; \
+    \
+    # yq-go for structured modules.yaml edits
+    YQ_ARCH="${TARGETARCH:-$(uname -m)}"; \
+    case "$YQ_ARCH" in x86_64) YQ_ARCH=amd64 ;; aarch64) YQ_ARCH=arm64 ;; esac; \
+    curl -fsSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${YQ_ARCH}"; \
+    chmod +x /usr/local/bin/yq; \
     \
     # Python venv
     python3 -m venv /opt/venv; \
