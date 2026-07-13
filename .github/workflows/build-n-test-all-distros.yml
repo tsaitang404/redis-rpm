@@ -22,10 +22,6 @@ on:
       TEST_OS:
         type: string
         description: "JSON array of test configurations"
-      MODERN_MODULES_BUILD:
-        type: string
-        description: "Whether to use modern Redis modules build flow"
-        default: "false"
 
 jobs:
   build-containers:
@@ -66,7 +62,6 @@ jobs:
           distro_version: ${{ matrix.distro_version }}
           platform: ${{ matrix.platform }}
           release_tag: ${{ inputs.release_tag }}
-          modern_modules_build: ${{ inputs.MODERN_MODULES_BUILD }}
 
   run-smoke-tests:
     name: Test RPM (${{ matrix.distro }}${{ matrix.distro_version }}-${{ matrix.platform }})
