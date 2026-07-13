@@ -75,7 +75,7 @@ jobs:
 
       - name: Determine module build system
         id: module-build-system
-        uses: redis-developer/redis-oss-release-automation/.github/actions/determine-module-build-system@master
+        uses: redis-developer/redis-oss-release-automation/.github/actions/determine-module-build-system@main
         with:
           release_tag: ${{ steps.module-version.outputs.release_tag }}
     outputs:
