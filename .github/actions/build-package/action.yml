@@ -88,9 +88,6 @@ runs:
         elif [ -f /etc/profile.d/gcc-toolset-13.sh ]; then
           source /etc/profile.d/gcc-toolset-13.sh
         fi
-        export BUILD_WITH_MODULES=yes
-        export INSTALL_RUST_TOOLCHAIN=yes
-        export DISABLE_WERRORS=yes
         export BUILD_TLS=yes
         export USE_SYSTEMD=yes
         # Enable RediSearch LTO only where our LLVM toolchain is installed.
@@ -108,20 +105,32 @@ runs:
           git clone --depth 1 https://github.com/redis/redis.git -b unstable
           cd redis
 
-          # Update module versions to use master branch
-          echo "Updating module versions to use master branch..."
-          for module in redisbloom redisearch redistimeseries redisjson; do
-            if [ -f "modules/${module}/Makefile" ]; then
-              echo "Updating ${module} to use master branch"
-              sed -i "s/MODULE_VERSION = .*/MODULE_VERSION = master/" "modules/${module}/Makefile"
-              cat "modules/${module}/Makefile" | grep "MODULE_VERSION"
-            fi
-          done
+          # Point every module at the master branch in the manifest.
+          echo "Updating module refs to use master branch..."
+          if [ ! -f modules/modules.yaml ]; then
+            echo "modules/modules.yaml not found"
+            exit 1
+          fi
+          yq -i '.modules[].ref = "master"' modules/modules.yaml
+          yq '.modules[] | .name + "=" + .ref' modules/modules.yaml
         else
           # Download and extract Redis source
           curl -L "https://github.com/redis/redis/archive/refs/tags/${{ steps.version.outputs.VERSION }}.tar.gz" -o redis.tar.gz
           tar xzf redis.tar.gz
           cd redis-${{ steps.version.outputs.VERSION }}
+        fi
+
+        if [ "${{ steps.version.outputs.VERSION }}" = "unstable" ] || [ -f modules/modules.yaml ]; then
+          MODERN_MODULES_BUILD=true
+        else
+          MODERN_MODULES_BUILD=false
+        fi
+        echo "Modern modules build: $MODERN_MODULES_BUILD"
+
+        if [ "$MODERN_MODULES_BUILD" != "true" ]; then
+          export BUILD_WITH_MODULES=yes
+          export INSTALL_RUST_TOOLCHAIN=yes
+          export DISABLE_WERRORS=yes
         fi
 
         # Build Redis
@@ -134,8 +143,14 @@ runs:
         if [ "${{ inputs.platform }}" = "arm64" ]; then
           export JEMALLOC_CONFIGURE_OPTS="--with-lg-page=16"
         fi
-        make -j "$(nproc)" all
-        make install PREFIX=/usr/local
+        if [ "$MODERN_MODULES_BUILD" = "true" ]; then
+          make modules-update MODULES_UPDATE_SHALLOW=1
+          make -C modules install-rust INSTALL_RUST_TOOLCHAIN=yes
+          make -j "$(nproc)" deploy PREFIX=/usr/local
+        else
+          make -j "$(nproc)" all
+          make install PREFIX=/usr/local
+        fi
         echo "Contents of /usr/local/lib/redis/modules/:"
         ls -la /usr/local/lib/redis/modules/
 

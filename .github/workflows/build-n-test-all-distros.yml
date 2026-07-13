@@ -28,7 +28,7 @@ jobs:
     name: Build Builder Containers
     uses: ./.github/workflows/build_workflow_containers.yaml
     with:
-      checkout_ref: ${{ inputs.release_tag == 'unstable' && 'unstable' || '' }}
+      checkout_ref: ${{ github.event_name != 'pull_request' && inputs.release_tag == 'unstable' && 'unstable' || '' }}
 
   build-package:
     name: Build RPM (${{ matrix.distro }}${{ matrix.distro_version }}-${{ matrix.platform }})
@@ -44,7 +44,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.release_tag == 'unstable' && 'unstable' || '' }}
+          ref: ${{ github.event_name != 'pull_request' && inputs.release_tag == 'unstable' && 'unstable' || '' }}
 
       - name: Ensure Release Branch
         if: inputs.release_tag != '' && inputs.release_tag != 'unstable'
@@ -77,7 +77,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.release_tag == 'unstable' && 'unstable' || (inputs.release_tag != '' && needs.build-package.outputs.release_version_branch || '') }}
+          ref: ${{ github.event_name != 'pull_request' && inputs.release_tag == 'unstable' && 'unstable' || (inputs.release_tag != '' && inputs.release_tag != 'unstable' && needs.build-package.outputs.release_version_branch || '') }}
 
       - name: Run smoke tests
         uses: ./.github/actions/run-smoke-tests
