@@ -120,6 +120,19 @@ runs:
           cd redis-${{ steps.version.outputs.VERSION }}
         fi
 
+        if [ "${{ steps.version.outputs.VERSION }}" = "unstable" ] || [ -f modules/modules.yaml ]; then
+          MODERN_MODULES_BUILD=true
+        else
+          MODERN_MODULES_BUILD=false
+        fi
+        echo "Modern modules build: $MODERN_MODULES_BUILD"
+
+        if [ "$MODERN_MODULES_BUILD" != "true" ]; then
+          export BUILD_WITH_MODULES=yes
+          export INSTALL_RUST_TOOLCHAIN=yes
+          export DISABLE_WERRORS=yes
+        fi
+
         # Build Redis
         # On arm64, configure jemalloc with a 64 KiB max page size so the
         # resulting binary runs on aarch64 hosts that use 64K pages (e.g.
@@ -130,9 +143,14 @@ runs:
         if [ "${{ inputs.platform }}" = "arm64" ]; then
           export JEMALLOC_CONFIGURE_OPTS="--with-lg-page=16"
         fi
-        make modules-update MODULES_UPDATE_SHALLOW=1
-        make -C modules install-rust INSTALL_RUST_TOOLCHAIN=yes
-        make -j "$(nproc)" deploy PREFIX=/usr/local
+        if [ "$MODERN_MODULES_BUILD" = "true" ]; then
+          make modules-update MODULES_UPDATE_SHALLOW=1
+          make -C modules install-rust INSTALL_RUST_TOOLCHAIN=yes
+          make -j "$(nproc)" deploy PREFIX=/usr/local
+        else
+          make -j "$(nproc)" all
+          make install PREFIX=/usr/local
+        fi
         echo "Contents of /usr/local/lib/redis/modules/:"
         ls -la /usr/local/lib/redis/modules/
 
