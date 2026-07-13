@@ -23,6 +23,7 @@ jobs:
     outputs:
       BUILD_OS: ${{ steps.populate-env-vars.outputs.BUILD_OS }}
       TEST_OS: ${{ steps.populate-env-vars.outputs.TEST_OS }}
+      MODERN_MODULES_BUILD: ${{ steps.module-build-system.outputs.MODERN_MODULES_BUILD }}
     runs-on: ["ubuntu-latest"]
     steps:
       - name: Checkout code
@@ -53,6 +54,12 @@ jobs:
         id: populate-env-vars
         uses: ./.github/actions/parse-env-file
 
+      - name: Determine module build system
+        id: module-build-system
+        uses: redis-developer/redis-oss-release-automation/.github/actions/determine-module-build-system@master
+        with:
+          release_tag: ${{ github.event.inputs.release_tag }}
+
   build-n-test:
     needs:
       - prepare-release
@@ -60,6 +67,7 @@ jobs:
     with:
       BUILD_OS: ${{ needs.prepare-release.outputs.BUILD_OS }}
       TEST_OS: ${{ needs.prepare-release.outputs.TEST_OS }}
+      MODERN_MODULES_BUILD: ${{ needs.prepare-release.outputs.MODERN_MODULES_BUILD }}
       release_tag: ${{ inputs.release_tag }}
 
   create-release-handle:

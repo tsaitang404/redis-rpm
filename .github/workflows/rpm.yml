@@ -23,6 +23,7 @@ on:
 
 run-name: >-
         ${{ (github.ref_name == 'unstable'
+        || github.base_ref == 'unstable'
         || github.event_name == 'workflow_dispatch'
         || github.event_name == 'workflow_call'
         || github.event_name == 'schedule')
@@ -38,10 +39,11 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: >-
-            ${{ (github.ref_name == 'unstable'
+            ${{ (github.event_name != 'pull_request'
+            && (github.ref_name == 'unstable'
             || github.event_name == 'workflow_dispatch'
             || github.event_name == 'workflow_call'
-            || github.event_name == 'schedule')
+            || github.event_name == 'schedule'))
             && 'unstable'
             || ''
             }}
@@ -49,9 +51,37 @@ jobs:
       - name: Parse vars
         id: parse
         uses: ./.github/actions/parse-env-file
+
+      - name: Determine Redis version for module build system
+        id: module-version
+        shell: bash
+        env:
+          IS_UNSTABLE_BUILD: >-
+            ${{ github.ref_name == 'unstable'
+            || github.base_ref == 'unstable'
+            || github.event_name == 'workflow_dispatch'
+            || github.event_name == 'workflow_call'
+            || github.event_name == 'schedule'
+            }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_UNSTABLE_BUILD" = "true" ]; then
+            version="unstable"
+          else
+            version="$(cat .redis_version)"
+          fi
+          echo "release_tag=$version" >> "$GITHUB_OUTPUT"
+          echo "Module build system version: $version"
+
+      - name: Determine module build system
+        id: module-build-system
+        uses: redis-developer/redis-oss-release-automation/.github/actions/determine-module-build-system@master
+        with:
+          release_tag: ${{ steps.module-version.outputs.release_tag }}
     outputs:
       BUILD_OS: ${{ steps.parse.outputs.BUILD_OS }}
       TEST_OS: ${{ steps.parse.outputs.TEST_OS }}
+      MODERN_MODULES_BUILD: ${{ steps.module-build-system.outputs.MODERN_MODULES_BUILD }}
 
   build-n-test:
     uses: ./.github/workflows/build-n-test-all-distros.yml
@@ -59,12 +89,14 @@ jobs:
     with:
       BUILD_OS: ${{ needs.populate-env-vars.outputs.BUILD_OS }}
       TEST_OS: ${{ needs.populate-env-vars.outputs.TEST_OS }}
+      MODERN_MODULES_BUILD: ${{ needs.populate-env-vars.outputs.MODERN_MODULES_BUILD }}
       # Determine whether we should use special "unstable" release_tag. Assume
-      # that for unstable branch and for any external call, dispatch or schedule
-      # we are building unstable release. In other cases it's a regular PR/push
+      # that for unstable branch, PRs targeting unstable, and any external
+      # call, dispatch or schedule we are building unstable release. In other cases it's a regular PR/push
       # build without using specific release_tag.
       release_tag: >-
         ${{ (github.ref_name == 'unstable'
+        || github.base_ref == 'unstable'
         || github.event_name == 'workflow_dispatch'
         || github.event_name == 'workflow_call'
         || github.event_name == 'schedule')

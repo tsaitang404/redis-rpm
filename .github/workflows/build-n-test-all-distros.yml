@@ -22,13 +22,17 @@ on:
       TEST_OS:
         type: string
         description: "JSON array of test configurations"
+      MODERN_MODULES_BUILD:
+        type: string
+        description: "Whether to use modern Redis modules build flow"
+        default: "false"
 
 jobs:
   build-containers:
     name: Build Builder Containers
     uses: ./.github/workflows/build_workflow_containers.yaml
     with:
-      checkout_ref: ${{ inputs.release_tag == 'unstable' && 'unstable' || '' }}
+      checkout_ref: ${{ github.event_name != 'pull_request' && inputs.release_tag == 'unstable' && 'unstable' || '' }}
 
   build-package:
     name: Build RPM (${{ matrix.distro }}${{ matrix.distro_version }}-${{ matrix.platform }})
@@ -44,7 +48,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.release_tag == 'unstable' && 'unstable' || '' }}
+          ref: ${{ github.event_name != 'pull_request' && inputs.release_tag == 'unstable' && 'unstable' || '' }}
 
       - name: Ensure Release Branch
         if: inputs.release_tag != '' && inputs.release_tag != 'unstable'
@@ -62,6 +66,7 @@ jobs:
           distro_version: ${{ matrix.distro_version }}
           platform: ${{ matrix.platform }}
           release_tag: ${{ inputs.release_tag }}
+          modern_modules_build: ${{ inputs.MODERN_MODULES_BUILD }}
 
   run-smoke-tests:
     name: Test RPM (${{ matrix.distro }}${{ matrix.distro_version }}-${{ matrix.platform }})
@@ -77,7 +82,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.release_tag == 'unstable' && 'unstable' || (inputs.release_tag != '' && needs.build-package.outputs.release_version_branch || '') }}
+          ref: ${{ github.event_name != 'pull_request' && inputs.release_tag == 'unstable' && 'unstable' || (inputs.release_tag != '' && inputs.release_tag != 'unstable' && needs.build-package.outputs.release_version_branch || '') }}
 
       - name: Run smoke tests
         uses: ./.github/actions/run-smoke-tests

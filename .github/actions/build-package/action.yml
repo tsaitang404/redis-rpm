@@ -14,6 +14,9 @@ inputs:
   release_tag:
     description: "Release tag (version or 'unstable')"
     required: true
+  modern_modules_build:
+    description: "Whether to use modern Redis modules build flow"
+    required: true
 
 runs:
   using: "composite"
@@ -90,6 +93,11 @@ runs:
         fi
         export BUILD_TLS=yes
         export USE_SYSTEMD=yes
+        if [ "${{ inputs.modern_modules_build }}" != "true" ]; then
+          export BUILD_WITH_MODULES=yes
+          export INSTALL_RUST_TOOLCHAIN=yes
+          export DISABLE_WERRORS=yes
+        fi
         # Enable RediSearch LTO only where our LLVM toolchain is installed.
         # Rocky 8 and 9 lacks a compatible libstdc++ runtime for the prebuilt LLVM
         # binaries so it has no /opt/llvm; Rocky 10 does.
@@ -130,9 +138,14 @@ runs:
         if [ "${{ inputs.platform }}" = "arm64" ]; then
           export JEMALLOC_CONFIGURE_OPTS="--with-lg-page=16"
         fi
-        make modules-update MODULES_UPDATE_SHALLOW=1
-        make -C modules install-rust INSTALL_RUST_TOOLCHAIN=yes
-        make -j "$(nproc)" deploy PREFIX=/usr/local
+        if [ "${{ inputs.modern_modules_build }}" = "true" ]; then
+          make modules-update MODULES_UPDATE_SHALLOW=1
+          make -C modules install-rust INSTALL_RUST_TOOLCHAIN=yes
+          make -j "$(nproc)" deploy PREFIX=/usr/local
+        else
+          make -j "$(nproc)" all
+          make install PREFIX=/usr/local
+        fi
         echo "Contents of /usr/local/lib/redis/modules/:"
         ls -la /usr/local/lib/redis/modules/
 
