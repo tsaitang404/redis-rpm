@@ -92,16 +92,11 @@ jobs:
       - name: Build RPM in container
         run: |
           set -ex
-          VERSION="${{ needs.check-upstream.outputs.release_tag }}"
-          TAG="${VERSION}"
-
           docker run --rm -v "$PWD:/workspace" -w /workspace \
-            ${{ matrix.distro }}:${{ matrix.distro_version }} bash -ex build-one.sh
-          # build-one.sh 见仓库根目录（本流水线会先提交它）
+            -e REDIS_VERSION="${{ needs.check-upstream.outputs.release_tag }}" \
+            ${{ matrix.distro }}:${{ matrix.distro_version }} bash -ex /workspace/build-one.sh
 
-          ls -lh dist/*.rpm || true
-        env:
-          REDIS_VERSION: ${{ needs.check-upstream.outputs.release_tag }}
+          ls -lh dist/*.rpm
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
