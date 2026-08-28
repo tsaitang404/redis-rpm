@@ -17,7 +17,7 @@ wget -q "https://download.redis.io/releases/redis-${VERSION}.tar.gz"
 tar xzf "redis-${VERSION}.tar.gz"
 cd "redis-${VERSION}"
 
-mkdir -p /build/dist
+mkdir -p /workspace/dist
 mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 tar czf ~/rpmbuild/SOURCES/redis-${VERSION}.tar.gz -C /tmp redis-${VERSION}
 
@@ -100,6 +100,6 @@ EOF
 rpmbuild -bb ~/rpmbuild/SPECS/redis.spec
 
 # --- collect -----------------------------------------------------------------
-find ~/rpmbuild/RPMS -name "*.rpm" -exec cp {} /build/dist/ \;
+find ~/rpmbuild/RPMS -name "*.rpm" -exec cp {} /workspace/dist/ \;
 echo "== built =="
-ls -lh /build/dist/
+ls -lh /workspace/dist/
