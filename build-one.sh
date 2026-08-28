@@ -47,7 +47,12 @@ tar czf ~/rpmbuild/SOURCES/redis-${VERSION}.tar.gz -C /tmp redis-${VERSION}
 if [ "$MAJOR" -ge 8 ]; then
   # Install module dependencies first (non-fatal)
   make bootstrap 2>&1 | tail -5 || true
-  BUILD_CMD='make build -j$(nproc)'
+  # Build core first, then modules (continue on failure)
+  make -C src all -j$(nproc)
+  for mod in redisbloom redisearch redisjson redistimeseries; do
+    [ -d "modules/$mod" ] && make -C modules/$mod -j$(nproc) 2>&1 | tail -3 || echo "==> $mod: FAILED"
+  done
+  BUILD_CMD='echo done'
 else
   BUILD_CMD='make -j$(nproc)'
 fi
