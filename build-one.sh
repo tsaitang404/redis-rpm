@@ -9,7 +9,7 @@ MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
 # --- dependencies ------------------------------------------------------------
 dnf install -y -q gcc gcc-c++ make cmake wget tar gzip rpm-build \
-  python3 python3-pip openssl-devel 2>&1 | tail -1
+  python3 python3-pip openssl-devel which 2>&1 | tail -1
 
 # --- fetch source ------------------------------------------------------------
 cd /tmp
