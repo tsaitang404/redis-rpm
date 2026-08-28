@@ -1,0 +1,25 @@
+name: Sync fork with upstream
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: unstable
+      - name: Sync with upstream
+        run: |
+          git remote add upstream "https://github.com/redis/redis-rpm.git"
+          git fetch upstream unstable
+          git checkout unstable
+          git merge "upstream/unstable" --ff-only
+          git push origin unstable
