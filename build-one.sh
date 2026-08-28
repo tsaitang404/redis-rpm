@@ -12,11 +12,18 @@ dnf install -y -q gcc gcc-c++ make cmake wget tar gzip rpm-build \
   python3 python3-pip openssl-devel which git unzip curl \
   libtool automake autoconf jq systemd-devel 2>&1 | tail -1
 
-# el8: enable PowerTools + EPEL + gcc-toolset-13
+# el8: enable PowerTools + EPEL + gcc-toolset-13 + python3.9
 if [ "$MAJOR" -ge 8 ]; then
   dnf install -y -q epel-release 2>&1 | tail -1
   dnf config-manager --set-enabled powertools 2>/dev/null || \
   dnf config-manager --set-enabled crb 2>/dev/null || true
+  # Python 3.9+ (modules need dataclasses etc.)
+  dnf install -y -q python39 python39-pip python39-devel 2>&1 | tail -1 || true
+  if [ -f /usr/bin/python3.9 ]; then
+    alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 2 2>/dev/null || true
+    alternatives --set python3 /usr/bin/python3.9 2>/dev/null || true
+  fi
+  # gcc-toolset-13
   if dnf list -q gcc-toolset-13-gcc 2>/dev/null | grep -q gcc-toolset; then
     dnf install -y -q gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ 2>&1 | tail -1
     export PATH="/opt/rh/gcc-toolset-13/root/usr/bin:$PATH"
@@ -38,7 +45,7 @@ tar czf ~/rpmbuild/SOURCES/redis-${VERSION}.tar.gz -C /tmp redis-${VERSION}
 
 # --- build command -----------------------------------------------------------
 if [ "$MAJOR" -ge 8 ]; then
-  # Install module dependencies first
+  # Install module dependencies first (non-fatal)
   make bootstrap 2>&1 | tail -5 || true
   BUILD_CMD='make build -j$(nproc)'
 else
@@ -71,7 +78,6 @@ REPLACE_BUILD_CMD
 rm -rf %{buildroot}
 mkdir -p %{buildroot}{/usr/bin,/etc/redis/sentinel,/var/lib/redis,/var/log/redis,/run/redis,/run/sentinel,/usr/lib/redis/modules,/usr/lib/systemd/system,/usr/share/selinux/packages}
 
-# Binaries
 install -m 755 src/redis-server     %{buildroot}/usr/bin/
 install -m 755 src/redis-cli        %{buildroot}/usr/bin/
 install -m 755 src/redis-benchmark  %{buildroot}/usr/bin/
@@ -83,16 +89,13 @@ ln -s redis-server %{buildroot}/usr/bin/redis-sentinel
 if ls bin/linux-*-release/*.so >/dev/null 2>&1; then
   install -m 755 bin/linux-*-release/*.so %{buildroot}/usr/lib/redis/modules/
 fi
-# RediSearch puts its .so in a subdirectory
 if ls bin/linux-*-release/search-community/*.so >/dev/null 2>&1; then
   install -m 755 bin/linux-*-release/search-community/*.so %{buildroot}/usr/lib/redis/modules/
 fi
 
-# Config files
 install -m 640 redis.conf    %{buildroot}/etc/redis/redis.conf
 install -m 640 sentinel.conf %{buildroot}/etc/redis/sentinel/sentinel.conf
 
-# redis.service (matches official)
 cat > %{buildroot}/usr/lib/systemd/system/redis.service <<'SVCEOF'
 [Unit]
 Description=Advanced key-value store
@@ -108,7 +111,6 @@ User=redis
 Group=redis
 RuntimeDirectory=redis
 RuntimeDirectoryMode=2755
-
 UMask=007
 PrivateTmp=yes
 LimitNOFILE=65535
@@ -118,7 +120,6 @@ ReadOnlyDirectories=/
 ReadWriteDirectories=-/var/lib/redis
 ReadWriteDirectories=-/var/log/redis
 ReadWriteDirectories=-/run/redis
-
 NoNewPrivileges=true
 CapabilityBoundingSet=CAP_SYS_RESOURCE
 ProtectSystem=true
@@ -129,7 +130,6 @@ WantedBy=multi-user.target
 Alias=redis.service
 SVCEOF
 
-# redis-sentinel.service (matches official)
 cat > %{buildroot}/usr/lib/systemd/system/redis-sentinel.service <<'SVCEOF'
 [Unit]
 Description=Advanced key-value store
@@ -145,7 +145,6 @@ User=redis
 Group=redis
 RuntimeDirectory=sentinel
 RuntimeDirectoryMode=2755
-
 UMask=007
 PrivateTmp=yes
 LimitNOFILE=65535
@@ -155,7 +154,6 @@ ReadOnlyDirectories=/
 ReadWriteDirectories=-/var/lib/redis
 ReadWriteDirectories=-/var/log/redis
 ReadWriteDirectories=-/run/sentinel
-
 NoNewPrivileges=true
 CapabilityBoundingSet=CAP_SYS_RESOURCE
 ProtectSystem=true
@@ -166,7 +164,6 @@ WantedBy=multi-user.target
 Alias=redis-sentinel.service
 SVCEOF
 
-# SELinux policy
 cat > %{buildroot}/usr/share/selinux/packages/redis-ce.te <<'SEPOL'
 module redis-ce 1.0;
 
