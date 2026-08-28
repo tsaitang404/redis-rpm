@@ -9,7 +9,7 @@ MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
 # --- dependencies (8.x needs more for modules) --------------------------------
 if [ "$MAJOR" -ge 8 ]; then
-  dnf install -y -q gcc gcc-c++ make cmake git wget tar gzip \
+  dnf install -y -q gcc gcc-c++ make cmake git wget tar gzip rpm-build \
     python3 python3-pip openssl-devel \
     2>&1 | tail -1
 else
