@@ -7,16 +7,11 @@ VERSION="${REDIS_VERSION:?REDIS_VERSION not set}"
 ARCH=$(uname -m)
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
-# --- dependencies (8.x needs more for modules) --------------------------------
-if [ "$MAJOR" -ge 8 ]; then
-  dnf install -y -q gcc gcc-c++ make cmake git wget tar gzip rpm-build \
-    python3 python3-pip openssl-devel \
-    2>&1 | tail -1
-else
-  dnf install -y -q gcc make wget tar gzip 2>&1 | tail -1
-fi
+# --- dependencies ------------------------------------------------------------
+dnf install -y -q gcc gcc-c++ make cmake wget tar gzip rpm-build \
+  python3 python3-pip openssl-devel 2>&1 | tail -1
 
-# --- fetch source -------------------------------------------------------------
+# --- fetch source ------------------------------------------------------------
 cd /tmp
 wget -q "https://download.redis.io/releases/redis-${VERSION}.tar.gz"
 tar xzf "redis-${VERSION}.tar.gz"
@@ -26,13 +21,7 @@ mkdir -p /build/dist
 mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 tar czf ~/rpmbuild/SOURCES/redis-${VERSION}.tar.gz -C /tmp redis-${VERSION}
 
-# --- spec (8.x uses make build which includes modules; <8.x uses plain make) --
-if [ "$MAJOR" -ge 8 ]; then
-  BUILD_CMD='make build -j$(nproc)'
-else
-  BUILD_CMD='make -j$(nproc) MALLOC=libc'
-fi
-
+# --- spec: build core only (no modules) --------------------------------------
 cat > ~/rpmbuild/SPECS/redis.spec <<EOF
 %define debug_package %{nil}
 Name:           redis
@@ -52,11 +41,11 @@ broker. Auto-built from tsaitang404/redis-rpm pipeline.
 %setup -q
 
 %build
-${BUILD_CMD}
+make -j\$(nproc) MALLOC=libc
 
 %install
 rm -rf %{buildroot}
-mkdir -p %{buildroot}{/usr/bin,/etc/redis,/var/lib/redis,/var/log/redis,/run/redis,/usr/lib/redis/modules,/usr/lib/systemd/system}
+mkdir -p %{buildroot}{/usr/bin,/etc/redis,/var/lib/redis,/var/log/redis,/run/redis,/usr/lib/systemd/system}
 install -m 755 src/redis-server     %{buildroot}/usr/bin/
 install -m 755 src/redis-cli        %{buildroot}/usr/bin/
 install -m 755 src/redis-benchmark  %{buildroot}/usr/bin/
@@ -65,10 +54,6 @@ install -m 755 src/redis-check-rdb  %{buildroot}/usr/bin/
 ln -s redis-server %{buildroot}/usr/bin/redis-sentinel
 install -m 640 redis.conf    %{buildroot}/etc/redis/redis.conf
 install -m 640 sentinel.conf %{buildroot}/etc/redis/sentinel.conf
-# Install modules (8.x)
-if ls bin/linux-*-release/*.so >/dev/null 2>&1; then
-  install -m 755 bin/linux-*-release/*.so %{buildroot}/usr/lib/redis/modules/
-fi
 cat > %{buildroot}/usr/lib/systemd/system/redis.service <<'SVCEOF'
 [Unit]
 Description=Redis In-Memory Data Store
@@ -103,7 +88,6 @@ getent passwd redis >/dev/null || useradd -r -g redis -d /var/lib/redis -s /sbin
 %config(noreplace) /etc/redis/sentinel.conf
 %attr(750,redis,redis) /var/lib/redis
 %attr(750,redis,redis) /var/log/redis
-/usr/lib/redis/modules/
 /usr/lib/systemd/system/redis.service
 EOF
 
