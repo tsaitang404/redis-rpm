@@ -1,62 +1,51 @@
 #!/bin/bash
-# Build one Redis RPM inside a Rocky Linux container (aligned with official redis-rpm).
-# Env: REDIS_VERSION (e.g. 8.10.1)
+# Build Redis RPM using official redis-rpm project's build system.
+# Env: REDIS_VERSION
 set -ex
 
 VERSION="${REDIS_VERSION:?REDIS_VERSION not set}"
-ARCH=$(uname -m)
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
-# --- dependencies (match official Dockerfile) --------------------------------
+# --- base deps ---------------------------------------------------------------
+dnf install -y -q epel-release 2>&1 | tail -1 || true
+dnf config-manager --set-enabled powertools 2>/dev/null || \
+dnf config-manager --set-enabled crb 2>/dev/null || true
+
 dnf install -y -q gcc gcc-c++ make cmake wget tar gzip rpm-build \
   python3 python3-pip openssl-devel which git unzip curl \
-  libtool automake autoconf jq systemd-devel 2>&1 | tail -1
+  libtool automake autoconf jq systemd-devel \
+  gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ \
+  clang 2>&1 | tail -1
 
-# el8: enable PowerTools + EPEL + gcc-toolset-13 + python3.9
-if [ "$MAJOR" -ge 8 ]; then
-  dnf install -y -q epel-release 2>&1 | tail -1
-  dnf config-manager --set-enabled powertools 2>/dev/null || \
-  dnf config-manager --set-enabled crb 2>/dev/null || true
-  # Python 3.9+ (modules need dataclasses etc.)
-  dnf install -y -q python39 python39-pip python39-devel 2>&1 | tail -1 || true
-  if [ -f /usr/bin/python3.9 ]; then
-    alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 2 2>/dev/null || true
-    alternatives --set python3 /usr/bin/python3.9 2>/dev/null || true
-  fi
-  # gcc-toolset-13
-  if dnf list -q gcc-toolset-13-gcc 2>/dev/null | grep -q gcc-toolset; then
-    dnf install -y -q gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ 2>&1 | tail -1
-    export PATH="/opt/rh/gcc-toolset-13/root/usr/bin:$PATH"
-  fi
-  # Rust toolchain for RedisJSON
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 2>&1 | tail -3
-  export PATH="$HOME/.cargo/bin:$PATH"
-fi
+export PATH="/opt/rh/gcc-toolset-13/root/usr/bin:$PATH"
 
-# --- fetch source ------------------------------------------------------------
+# Rust for RedisJSON
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 2>&1 | tail -3
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# --- fetch source (official way: git clone + submodules) ---------------------
 cd /tmp
-wget -q "https://download.redis.io/releases/redis-${VERSION}.tar.gz"
-tar xzf "redis-${VERSION}.tar.gz"
-cd "redis-${VERSION}"
+if [ "$MAJOR" -ge 8 ]; then
+  # Use git to get full source with modules
+  git clone --depth 1 --branch "$VERSION" https://github.com/redis/redis.git redis-${VERSION} 2>&1 | tail -3
+  cd redis-${VERSION}
+  git submodule update --init --recursive 2>&1 | tail -5 || true
+  # Bootstrap module deps (non-fatal)
+  make bootstrap 2>&1 | tail -5 || true
+  BUILD_CMD='make build -j$(nproc) || make -C src all -j$(nproc)'
+else
+  wget -q "https://download.redis.io/releases/redis-${VERSION}.tar.gz"
+  tar xzf "redis-${VERSION}.tar.gz"
+  cd "redis-${VERSION}"
+  BUILD_CMD='make -j$(nproc)'
+fi
 
 mkdir -p /workspace/dist
 mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 tar czf ~/rpmbuild/SOURCES/redis-${VERSION}.tar.gz -C /tmp redis-${VERSION}
 
-# --- build command -----------------------------------------------------------
-if [ "$MAJOR" -ge 8 ]; then
-  # Install module dependencies first (non-fatal)
-  make bootstrap 2>&1 | tail -5 || true
-  # Build core first, then modules (continue on failure)
-  make -C src all -j$(nproc)
-  for mod in redisbloom redisearch redisjson redistimeseries; do
-    [ -d "modules/$mod" ] && make -C modules/$mod -j$(nproc) 2>&1 | tail -3 || echo "==> $mod: FAILED"
-  done
-  BUILD_CMD='echo done'
-else
-  BUILD_CMD='make -j$(nproc)'
-fi
-
+# --- spec (from git dir, not tarball) ----------------------------------------
+# We need to use the source from rpmbuild/BUILD, so symlink
 cat > ~/rpmbuild/SPECS/redis.spec <<'SPECEOF'
 %define debug_package %{nil}
 Name:           redis
@@ -69,9 +58,7 @@ Source0:        redis-REPLACE_VERSION.tar.gz
 BuildRequires:  gcc, gcc-c++, make, cmake, python3, openssl-devel
 
 %description
-Redis is an in-memory data structure store used as database, cache and message
-broker. Auto-built from tsaitang404/redis-rpm pipeline, aligned with official
-redis/redis-rpm packaging.
+Redis is an in-memory data structure store. Auto-built from tsaitang404/redis-rpm.
 
 %prep
 %setup -q
@@ -90,13 +77,10 @@ install -m 755 src/redis-check-aof  %{buildroot}/usr/bin/
 install -m 755 src/redis-check-rdb  %{buildroot}/usr/bin/
 ln -s redis-server %{buildroot}/usr/bin/redis-sentinel
 
-# Modules (8.x only)
-if ls bin/linux-*-release/*.so >/dev/null 2>&1; then
-  install -m 755 bin/linux-*-release/*.so %{buildroot}/usr/lib/redis/modules/
-fi
-if ls bin/linux-*-release/search-community/*.so >/dev/null 2>&1; then
-  install -m 755 bin/linux-*-release/search-community/*.so %{buildroot}/usr/lib/redis/modules/
-fi
+# Modules (8.x only, best-effort)
+for so in bin/linux-*-release/*.so bin/linux-*-release/search-community/*.so; do
+  [ -f "$so" ] && install -m 755 "$so" %{buildroot}/usr/lib/redis/modules/
+done
 
 install -m 640 redis.conf    %{buildroot}/etc/redis/redis.conf
 install -m 640 sentinel.conf %{buildroot}/etc/redis/sentinel/sentinel.conf
@@ -171,15 +155,7 @@ SVCEOF
 
 cat > %{buildroot}/usr/share/selinux/packages/redis-ce.te <<'SEPOL'
 module redis-ce 1.0;
-
-require {
-    type redis_t;
-    type redis_conf_t;
-    type redis_port_t;
-    class tcp_socket name_connect;
-    class file { read write open };
-}
-
+require { type redis_t; type redis_conf_t; class file { read write open }; }
 allow redis_t redis_conf_t:file { read write open };
 SEPOL
 
@@ -193,14 +169,12 @@ getent group redis  >/dev/null || groupadd -r redis
 getent passwd redis >/dev/null || useradd -r -g redis -d /var/lib/redis -s /sbin/nologin redis
 
 %post
-if command -v checkmodule &>/dev/null && command -v semodule_package &>/dev/null; then
+command -v checkmodule &>/dev/null && command -v semodule_package &>/dev/null && {
     checkmodule -M -m /usr/share/selinux/packages/redis-ce.te -o /usr/share/selinux/packages/redis-ce.mod 2>/dev/null || true
     semodule_package -m /usr/share/selinux/packages/redis-ce.mod -o /usr/share/selinux/packages/redis-ce.pp -f /usr/share/selinux/packages/redis-ce.fc 2>/dev/null || true
     semodule -i /usr/share/selinux/packages/redis-ce.pp 2>/dev/null || true
-fi
-if command -v chcon &>/dev/null; then
-    chcon -t redis_conf_t /etc/redis/sentinel /etc/redis/sentinel/sentinel.conf 2>/dev/null || true
-fi
+}
+command -v chcon &>/dev/null && chcon -t redis_conf_t /etc/redis/sentinel /etc/redis/sentinel/sentinel.conf 2>/dev/null || true
 
 %files
 /usr/bin/redis-server
@@ -225,7 +199,6 @@ sed -i "s|REPLACE_BUILD_CMD|${BUILD_CMD}|" ~/rpmbuild/SPECS/redis.spec
 
 rpmbuild -bb ~/rpmbuild/SPECS/redis.spec
 
-# --- collect (exclude debuginfo/debugsource) ---------------------------------
 find ~/rpmbuild/RPMS -name "*.rpm" ! -name "*debug*" -exec cp {} /workspace/dist/ \;
 echo "== built =="
 ls -lh /workspace/dist/
