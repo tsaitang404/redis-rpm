@@ -6,12 +6,17 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Redis version tag to build (e.g. 8.10.1). Leave empty to auto-detect latest.'
+        description: 'Redis version tag to build (e.g. 8.10.1).'
         required: false
         type: string
 
 permissions:
   contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/builder
 
 jobs:
   check-upstream:
@@ -54,66 +59,58 @@ jobs:
   build-rpm:
     needs: check-upstream
     if: needs.check-upstream.outputs.should_build == 'true'
-    runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu24-arm64-2-8' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - distro: rockylinux
-            version: 8
-            platform: amd64
-          - distro: rockylinux
-            version: 9
-            platform: amd64
-          - distro: rockylinux
-            version: 10
-            platform: amd64
-          - distro: rockylinux
-            version: 8
-            platform: arm64
-          - distro: rockylinux
-            version: 9
-            platform: arm64
-          - distro: rockylinux
-            version: 10
-            platform: arm64
+          - distro: rockylinux8
+          - distro: rockylinux9
+          - distro: rockylinux10
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        if: matrix.platform != 'amd64'
-        uses: docker/setup-qemu-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build RPM in builder container
+      - name: Pull builder image
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}-${{ github.sha }}-amd64 || \
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}-unstable || \
+          echo "NEED_BUILD=true" >> $GITHUB_ENV
+
+      - name: Build builder image (fallback)
+        if: env.NEED_BUILD == 'true'
+        run: |
+          docker build \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}-unstable \
+            -f dockerfiles/Dockerfile.${{ matrix.distro }} \
+            .
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}-unstable
+
+      - name: Build RPM
         env:
           REDIS_VERSION: ${{ needs.check-upstream.outputs.tag }}
         run: |
-          set -ex
-          DISTRO="${{ matrix.distro }}${{ matrix.version }}"
-          DOCKERFILE="dockerfiles/Dockerfile.${DISTRO}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}-${{ github.sha }}-amd64"
+          docker image inspect "$IMAGE" &>/dev/null || \
+            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}-unstable"
           
-          # Build the builder image
-          docker build \
-            --platform linux/${{ matrix.platform }} \
-            -t "redis-builder:${DISTRO}" \
-            -f "$DOCKERFILE" \
-            .
-          
-          # Run the build inside the builder
           docker run --rm \
-            --platform linux/${{ matrix.platform }} \
             -v "$PWD:/workspace" \
             -w /workspace \
             -e REDIS_VERSION="$REDIS_VERSION" \
-            "redis-builder:${DISTRO}" \
+            "$IMAGE" \
             bash /workspace/build-one.sh
-          
-          ls -lh dist/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rpms-${{ matrix.distro }}${{ matrix.version }}-${{ matrix.platform }}
+          name: rpms-${{ matrix.distro }}
           path: dist/*.rpm
           retention-days: 1
 
