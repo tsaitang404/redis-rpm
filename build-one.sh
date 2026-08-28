@@ -36,6 +36,7 @@ MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
 # --- spec --------------------------------------------------------------------
 cat > ~/rpmbuild/SPECS/redis.spec <<EOF
+%define debug_package %{nil}
 Name:           redis
 Version:        ${VERSION}
 Release:        1%{?dist}
