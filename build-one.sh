@@ -37,7 +37,7 @@ Redis core (no bundled modules).
 %setup -q
 
 %build
-if [ "$MAJOR" -ge 8 ]; then make -C src all -j$(nproc); else make -j$(nproc); fi
+make -j$(nproc)
 
 %install
 rm -rf %{buildroot}
