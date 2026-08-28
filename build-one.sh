@@ -19,7 +19,6 @@ if [ "$MAJOR" -ge 8 ]; then
   dnf config-manager --set-enabled crb 2>/dev/null || true
   if dnf list -q gcc-toolset-13-gcc 2>/dev/null | grep -q gcc-toolset; then
     dnf install -y -q gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ 2>&1 | tail -1
-    source /opt/rh/gcc-toolset-13/enable 2>/dev/null || true
     export PATH="/opt/rh/gcc-toolset-13/root/usr/bin:$PATH"
   fi
   # Rust toolchain for RedisJSON
@@ -55,7 +54,7 @@ Summary:        Redis in-memory key-value database
 License:        BSD-3-Clause (<=7.2), RSALv2/SSPLv1 (7.4-7.8), RSALv2/SSPLv1/AGPLv3 (>=8.0)
 URL:            https://redis.io
 Source0:        redis-REPLACE_VERSION.tar.gz
-BuildRequires:  gcc, gcc-c++, make, cmake, python3, openssl-devel, rust
+BuildRequires:  gcc, gcc-c++, make, cmake, python3, openssl-devel
 
 %description
 Redis is an in-memory data structure store used as database, cache and message
