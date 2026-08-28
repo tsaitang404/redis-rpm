@@ -1,0 +1,142 @@
+name: Auto Build and Release on Upstream Tag
+
+# 当上游 redis/redis 发布新 tag 时自动触发：
+# 1. 同步 fork 代码（unstable 分支跟随 redis/redis-rpm 上游）
+# 2. 用 tag 版本号更新 .redis_version
+# 3. 构建 RPM（Rocky Linux 8/9/10 x amd64/arm64）
+# 4. 发布 GitHub Release 附带 RPM 包
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'   # 每 6 小时检查一次上游
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Redis 版本号（如 8.10.1），留空则自动检测最新 tag'
+        required: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  check-upstream:
+    name: Check upstream & sync fork
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.detect.outputs.release_tag }}
+      should_build: ${{ steps.detect.outputs.should_build }}
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: unstable
+
+      - name: Sync fork with redis-rpm upstream
+        run: |
+          git remote add rpmupstream "https://github.com/redis/redis-rpm.git"
+          git fetch rpmupstream unstable
+          git merge "rpmupstream/unstable" --ff-only || true
+          git push origin unstable
+
+      - name: Detect new upstream Redis tag
+        id: detect
+        run: |
+          # 手动指定了版本就用指定的
+          if [ -n "${{ inputs.release_tag }}" ]; then
+            TAG="${{ inputs.release_tag }}"
+          else
+            # 取 redis/redis 最新稳定 tag（排除 RC/不稳定）
+            TAG=$(git ls-remote --tags --sort=-v:refname https://github.com/redis/redis.git \
+                  | grep -v '\^{}' \
+                  | grep -vE 'rc|RC|unstable' \
+                  | head -1 | sed 's|.*refs/tags/||')
+          fi
+          echo "Latest upstream tag: $TAG"
+
+          # 检查是否已经发过这个版本的 Release
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, skip"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "New version $TAG detected, building"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+          echo "release_tag=$TAG" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-rpm:
+    name: Build RPM (${{ matrix.distro }}${{ matrix.distro_version }}-${{ matrix.platform }})
+    needs: check-upstream
+    if: needs.check-upstream.outputs.should_build == 'true'
+    runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { distro: rockylinux, distro_version: "8",  platform: amd64 }
+          - { distro: rockylinux, distro_version: "9",  platform: amd64 }
+          - { distro: rockylinux, distro_version: "10", platform: amd64 }
+          - { distro: rockylinux, distro_version: "8",  platform: arm64 }
+          - { distro: rockylinux, distro_version: "9",  platform: arm64 }
+          - { distro: rockylinux, distro_version: "10", platform: arm64 }
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: unstable
+
+      - name: Build RPM in container
+        run: |
+          set -ex
+          VERSION="${{ needs.check-upstream.outputs.release_tag }}"
+          TAG="${VERSION}"
+
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            ${{ matrix.distro }}:${{ matrix.distro_version }} bash -ex build-one.sh
+          # build-one.sh 见仓库根目录（本流水线会先提交它）
+
+          ls -lh dist/*.rpm || true
+        env:
+          REDIS_VERSION: ${{ needs.check-upstream.outputs.release_tag }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ matrix.distro }}${{ matrix.distro_version }}-${{ matrix.platform }}
+          path: dist/*.rpm
+
+  release:
+    name: Publish GitHub Release
+    needs: [check-upstream, build-rpm]
+    if: needs.check-upstream.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List packages
+        run: find artifacts -name "*.rpm" -exec ls -lh {} \;
+
+      - name: Create Release with RPMs
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check-upstream.outputs.release_tag }}
+          name: Redis ${{ needs.check-upstream.outputs.release_tag }} RPM
+          body: |
+            自动构建自上游 [redis/redis-rpm](https://github.com/redis/redis-rpm) 流水线。
+
+            Redis Open Source ${{ needs.check-upstream.outputs.release_tag }} RPM 包：
+            - Rocky Linux 8/9/10 (amd64 + arm64)
+
+            > 注：包含 RedisBloom / RediSearch / RedisTimeSeries / ReJSON 模块（8.x 起内置）
+          files: artifacts/**/*.rpm
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
