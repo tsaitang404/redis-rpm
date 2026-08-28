@@ -10,7 +10,7 @@ MAJOR=$(echo "$VERSION" | cut -d. -f1)
 # --- dependencies (8.x needs more for modules) --------------------------------
 if [ "$MAJOR" -ge 8 ]; then
   dnf install -y -q gcc gcc-c++ make cmake git wget tar gzip \
-    python3 python3-pip jemalloc-devel openssl-devel \
+    python3 python3-pip openssl-devel \
     2>&1 | tail -1
 else
   dnf install -y -q gcc make wget tar gzip 2>&1 | tail -1
