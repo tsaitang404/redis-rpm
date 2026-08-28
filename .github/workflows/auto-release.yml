@@ -92,9 +92,14 @@ jobs:
       - name: Build RPM in container
         run: |
           set -ex
+          IMAGE=${{ matrix.distro }}:${{ matrix.distro_version }}
+          # rockylinux 10 lives under rockysorg namespace
+          if [ "${{ matrix.distro }}${{ matrix.distro_version }}" = "rockylinux10" ]; then
+            IMAGE=rockylinux/rockylinux:10
+          fi
           docker run --rm -v "$PWD:/workspace" -w /workspace \
             -e REDIS_VERSION="${{ needs.check-upstream.outputs.release_tag }}" \
-            ${{ matrix.distro }}:${{ matrix.distro_version }} bash -ex /workspace/build-one.sh
+            "$IMAGE" bash -ex /workspace/build-one.sh
 
           ls -lh dist/*.rpm
 
