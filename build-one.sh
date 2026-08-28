@@ -1,64 +1,62 @@
 #!/bin/bash
 # Build one Redis RPM inside a Rocky Linux container.
-# Env: REDIS_VERSION (e.g. 8.10.1), optional REDIS_SOURCE_URL
+# Env: REDIS_VERSION (e.g. 8.10.1)
 set -ex
 
 VERSION="${REDIS_VERSION:?REDIS_VERSION not set}"
 ARCH=$(uname -m)
-BUILDER=/tmp/redis-rpm-builder
-
-dnf install -y -q gcc make rpm-build wget tar gzip jemalloc-devel || \
-dnf install -y -q gcc make rpm-build wget tar gzip
-
-# --- fetch source ------------------------------------------------------------
-mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS} "$BUILDER/dist"
-cd /tmp
-if [ -n "$REDIS_SOURCE_URL" ]; then
-  wget -q "$REDIS_SOURCE_URL" -O "redis-${VERSION}.tar.gz"
-else
-  wget -q "https://download.redis.io/releases/redis-${VERSION}.tar.gz"
-fi
-cp "redis-${VERSION}.tar.gz" ~/rpmbuild/SOURCES/
-
-# Extract once to grab configs from the redis-rpm repo (if mounted) or defaults
-tar xzf "redis-${VERSION}.tar.gz"
-
-# Use repo configs when available (repo is mounted at /workspace)
-if [ -d /workspace/configs ]; then
-  cp /workspace/configs/redis.conf        redis.conf
-  cp /workspace/configs/sentinel.conf     sentinel.conf
-  SVC_SRC=/workspace/configs/redis.service
-else
-  SVC_SRC=""
-fi
-
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
-# --- spec --------------------------------------------------------------------
+# --- dependencies (8.x needs more for modules) --------------------------------
+if [ "$MAJOR" -ge 8 ]; then
+  dnf install -y -q gcc gcc-c++ make cmake git wget tar gzip \
+    python3 python3-pip jemalloc-devel openssl-devel \
+    2>&1 | tail -1
+else
+  dnf install -y -q gcc make wget tar gzip 2>&1 | tail -1
+fi
+
+# --- fetch source -------------------------------------------------------------
+cd /tmp
+wget -q "https://download.redis.io/releases/redis-${VERSION}.tar.gz"
+tar xzf "redis-${VERSION}.tar.gz"
+cd "redis-${VERSION}"
+
+mkdir -p /build/dist
+mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+tar czf ~/rpmbuild/SOURCES/redis-${VERSION}.tar.gz -C /tmp redis-${VERSION}
+
+# --- spec (8.x uses make build which includes modules; <8.x uses plain make) --
+if [ "$MAJOR" -ge 8 ]; then
+  BUILD_CMD='make build -j$(nproc)'
+else
+  BUILD_CMD='make -j$(nproc) MALLOC=libc'
+fi
+
 cat > ~/rpmbuild/SPECS/redis.spec <<EOF
 %define debug_package %{nil}
 Name:           redis
 Version:        ${VERSION}
 Release:        1%{?dist}
 Summary:        Redis in-memory key-value database (auto build)
-License:        BSD-3-Clause
+License:        RSALv2/SSPLv1/AGPLv3
 URL:            https://redis.io
 Source0:        redis-${VERSION}.tar.gz
-BuildRequires:  gcc, make
+BuildRequires:  gcc, make, cmake, python3
 
 %description
 Redis is an in-memory data structure store used as database, cache and message
-broker. Auto-built from redis/redis-rpm pipeline.
+broker. Auto-built from tsaitang404/redis-rpm pipeline.
 
 %prep
 %setup -q
 
 %build
-make -j\$(nproc) MALLOC=libc
+${BUILD_CMD}
 
 %install
 rm -rf %{buildroot}
-mkdir -p %{buildroot}{/usr/bin,/etc/redis,/var/lib/redis,/var/log/redis,/run/redis,/usr/lib/systemd/system}
+mkdir -p %{buildroot}{/usr/bin,/etc/redis,/var/lib/redis,/var/log/redis,/run/redis,/usr/lib/redis/modules,/usr/lib/systemd/system}
 install -m 755 src/redis-server     %{buildroot}/usr/bin/
 install -m 755 src/redis-cli        %{buildroot}/usr/bin/
 install -m 755 src/redis-benchmark  %{buildroot}/usr/bin/
@@ -67,6 +65,10 @@ install -m 755 src/redis-check-rdb  %{buildroot}/usr/bin/
 ln -s redis-server %{buildroot}/usr/bin/redis-sentinel
 install -m 640 redis.conf    %{buildroot}/etc/redis/redis.conf
 install -m 640 sentinel.conf %{buildroot}/etc/redis/sentinel.conf
+# Install modules (8.x)
+if ls bin/linux-*-release/*.so >/dev/null 2>&1; then
+  install -m 755 bin/linux-*-release/*.so %{buildroot}/usr/lib/redis/modules/
+fi
 cat > %{buildroot}/usr/lib/systemd/system/redis.service <<'SVCEOF'
 [Unit]
 Description=Redis In-Memory Data Store
@@ -101,13 +103,13 @@ getent passwd redis >/dev/null || useradd -r -g redis -d /var/lib/redis -s /sbin
 %config(noreplace) /etc/redis/sentinel.conf
 %attr(750,redis,redis) /var/lib/redis
 %attr(750,redis,redis) /var/log/redis
+/usr/lib/redis/modules/
 /usr/lib/systemd/system/redis.service
 EOF
 
 rpmbuild -bb ~/rpmbuild/SPECS/redis.spec
 
 # --- collect -----------------------------------------------------------------
-mkdir -p /workspace/dist
-find ~/rpmbuild/RPMS -name "*.rpm" -exec cp {} /workspace/dist/ \;
+find ~/rpmbuild/RPMS -name "*.rpm" -exec cp {} /build/dist/ \;
 echo "== built =="
-ls -lh /workspace/dist/
+ls -lh /build/dist/
