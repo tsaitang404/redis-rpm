@@ -1,23 +1,32 @@
 #!/bin/bash
 set -ex
 VERSION="${REDIS_VERSION:?REDIS_VERSION not set}"
+ARCH=$(uname -m)
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
-dnf install -y -q gcc gcc-c++ make wget tar gzip rpm-build openssl-devel which 2>&1 | tail -1
-
-# el8: gcc-toolset-13
-if dnf list -q gcc-toolset-13-gcc 2>/dev/null | grep -q gcc-toolset; then
-  dnf install -y -q gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ 2>&1 | tail -1
-  export CC="/opt/rh/gcc-toolset-13/root/usr/bin/gcc"
-  export CXX="/opt/rh/gcc-toolset-13/root/usr/bin/g++"
+# --- fetch source ---
+cd /tmp
+if [ "$MAJOR" -ge 8 ]; then
+  git clone --depth 1 --branch "$VERSION" https://github.com/redis/redis.git "redis-${VERSION}" 2>&1 | tail -3
+  cd "redis-${VERSION}"
+  git submodule update --init --recursive 2>&1 | tail -5 || true
+  make bootstrap 2>&1 | tail -5 || true
+else
+  wget -q "https://download.redis.io/releases/redis-${VERSION}.tar.gz"
+  tar xzf "redis-${VERSION}.tar.gz"
+  cd "redis-${VERSION}"
 fi
 
-cd /tmp
-wget -q "https://download.redis.io/releases/redis-${VERSION}.tar.gz"
-tar xzf "redis-${VERSION}.tar.gz"
-cd "redis-${VERSION}"
 mkdir -p /workspace/dist ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-tar czf ~/rpmbuild/SOURCES/redis-${VERSION}.tar.gz -C /tmp redis-${VERSION}
+tar czf ~/rpmbuild/SOURCES/redis-${VERSION}.tar.gz -C /tmp "redis-${VERSION}"
+
+# Build core + modules separately
+make -C src all -j$(nproc)
+if [ "$MAJOR" -ge 8 ]; then
+  for mod in redisbloom redistimeseries redisearch redisjson; do
+    [ -d "modules/$mod" ] && make -C modules/$mod -j$(nproc) 2>&1 | tail -3 || echo "==> $mod: FAILED (continuing)"
+  done
+fi
 
 cat > ~/rpmbuild/SPECS/redis.spec <<SPECEOF
 %define debug_package %{nil}
@@ -31,25 +40,32 @@ Source0:        redis-${VERSION}.tar.gz
 BuildRequires:  gcc, make
 
 %description
-Redis core (no bundled modules).
+Redis core + available bundled modules.
 
 %prep
 %setup -q
 
 %build
-make -j$(nproc)
+# Core already built in build-one.sh, skip rpmbuild %build
 
 %install
 rm -rf %{buildroot}
-mkdir -p %{buildroot}{/usr/bin,/etc/redis/sentinel,/var/lib/redis,/var/log/redis,/run/redis,/run/sentinel,/usr/lib/systemd/system,/usr/share/selinux/packages}
+mkdir -p %{buildroot}{/usr/bin,/etc/redis/sentinel,/var/lib/redis,/var/log/redis,/run/redis,/run/sentinel,/usr/lib/redis/modules,/usr/lib/systemd/system,/usr/share/selinux/packages}
 install -m 755 src/redis-server %{buildroot}/usr/bin/
 install -m 755 src/redis-cli %{buildroot}/usr/bin/
 install -m 755 src/redis-benchmark %{buildroot}/usr/bin/
 install -m 755 src/redis-check-aof %{buildroot}/usr/bin/
 install -m 755 src/redis-check-rdb %{buildroot}/usr/bin/
 ln -s redis-server %{buildroot}/usr/bin/redis-sentinel
+
+# Install available module .so files
+for so in bin/linux-*-release/*.so bin/linux-*-release/search-community/*.so; do
+  [ -f "$so" ] && install -m 755 "$so" %{buildroot}/usr/lib/redis/modules/
+done
+
 install -m 640 redis.conf %{buildroot}/etc/redis/redis.conf
 install -m 640 sentinel.conf %{buildroot}/etc/redis/sentinel/sentinel.conf
+
 cat > %{buildroot}/usr/lib/systemd/system/redis.service <<'SVC'
 [Unit]
 Description=Advanced key-value store
@@ -80,6 +96,7 @@ ReadWriteDirectories=-/etc/redis
 [Install]
 WantedBy=multi-user.target
 SVC
+
 cat > %{buildroot}/usr/lib/systemd/system/redis-sentinel.service <<'SVC'
 [Unit]
 Description=Advanced key-value store
@@ -110,6 +127,7 @@ ReadWriteDirectories=-/etc/redis
 [Install]
 WantedBy=multi-user.target
 SVC
+
 cat > %{buildroot}/usr/share/selinux/packages/redis-ce.te <<'SE'
 module redis-ce 1.0;
 require { type redis_t; type redis_conf_t; class file { read write open }; }
@@ -143,13 +161,14 @@ command -v chcon &>/dev/null && chcon -t redis_conf_t /etc/redis/sentinel /etc/r
 %config(noreplace) /etc/redis/sentinel/sentinel.conf
 %attr(750,redis,redis) /var/lib/redis
 %attr(750,redis,redis) /var/log/redis
+/usr/lib/redis/modules/
 /usr/lib/systemd/system/redis.service
 /usr/lib/systemd/system/redis-sentinel.service
 /usr/share/selinux/packages/redis-ce.te
 /usr/share/selinux/packages/redis-ce.fc
 SPECEOF
 
-rpmbuild -bb ~/rpmbuild/SPECS/redis.spec
+rpmbuild -bb ~/rpmbuild/SPECS/redis.spec --define '__os_install_post %{nil}'
 find ~/rpmbuild/RPMS -name "*.rpm" ! -name "*debug*" -exec cp {} /workspace/dist/ \;
 echo "== built =="
 ls -lh /workspace/dist/
