@@ -12,11 +12,6 @@ on:
 
 permissions:
   contents: write
-  packages: read
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/builder
 
 jobs:
   check-upstream:
@@ -64,48 +59,61 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - distro: rockylinux8
+          - distro: rockylinux
+            version: 8
             platform: amd64
-          - distro: rockylinux9
+          - distro: rockylinux
+            version: 9
             platform: amd64
-          - distro: rockylinux10
+          - distro: rockylinux
+            version: 10
             platform: amd64
-          - distro: rockylinux8
+          - distro: rockylinux
+            version: 8
             platform: arm64
-          - distro: rockylinux9
+          - distro: rockylinux
+            version: 9
             platform: arm64
-          - distro: rockylinux10
+          - distro: rockylinux
+            version: 10
             platform: arm64
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        name: Download build script
 
-      - name: Build RPM in container
+      - name: Set up QEMU
+        if: matrix.platform != 'amd64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build RPM in builder container
         env:
           REDIS_VERSION: ${{ needs.check-upstream.outputs.tag }}
         run: |
           set -ex
-          # Use our own builder image (built by build_workflow_containers.yaml)
-          TAG="${{ matrix.distro }}-${{ github.sha }}"
-          # Try with SHA first, fall back to unstable branch ref
-          IMAGE="${REGISTRY}/${IMAGE_NAME}:${TAG}"
-          if ! docker pull "$IMAGE" 2>/dev/null; then
-            IMAGE="${REGISTRY}/${IMAGE_NAME}:${{ matrix.distro }}-unstable"
-          fi
+          DISTRO="${{ matrix.distro }}${{ matrix.version }}"
+          DOCKERFILE="dockerfiles/Dockerfile.${DISTRO}"
+          
+          # Build the builder image
+          docker build \
+            --platform linux/${{ matrix.platform }} \
+            -t "redis-builder:${DISTRO}" \
+            -f "$DOCKERFILE" \
+            .
+          
+          # Run the build inside the builder
           docker run --rm \
+            --platform linux/${{ matrix.platform }} \
             -v "$PWD:/workspace" \
             -w /workspace \
             -e REDIS_VERSION="$REDIS_VERSION" \
-            "$IMAGE" \
+            "redis-builder:${DISTRO}" \
             bash /workspace/build-one.sh
-          mkdir -p dist
-          cp workspace/dist/*.rpm dist/ 2>/dev/null || cp dist/*.rpm dist/ 2>/dev/null || true
+          
+          ls -lh dist/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rpms-${{ matrix.distro }}-${{ matrix.platform }}
+          name: rpms-${{ matrix.distro }}${{ matrix.version }}-${{ matrix.platform }}
           path: dist/*.rpm
           retention-days: 1
 
