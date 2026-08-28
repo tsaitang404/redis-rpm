@@ -21,7 +21,13 @@ mkdir -p /build/dist
 mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 tar czf ~/rpmbuild/SOURCES/redis-${VERSION}.tar.gz -C /tmp redis-${VERSION}
 
-# --- spec: build core only (no modules) --------------------------------------
+# --- build command (8.x uses 'make build core', older uses plain make) -------
+if [ "$MAJOR" -ge 8 ]; then
+  BUILD_CMD='make build core -j$(nproc)'
+else
+  BUILD_CMD='make -j$(nproc) MALLOC=libc'
+fi
+
 cat > ~/rpmbuild/SPECS/redis.spec <<EOF
 %define debug_package %{nil}
 Name:           redis
@@ -41,7 +47,7 @@ broker. Auto-built from tsaitang404/redis-rpm pipeline.
 %setup -q
 
 %build
-make -j\$(nproc) MALLOC=libc
+${BUILD_CMD}
 
 %install
 rm -rf %{buildroot}
