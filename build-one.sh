@@ -63,15 +63,27 @@ if [ "$LLD_FOUND" -eq 0 ]; then
     break
   done
 fi
-# Ensure llvm-ar-21 exists (needed for LTO static library creation)
-for ar_name in llvm-ar-21 llvm-ar; do
-  if command -v "$ar_name" &>/dev/null; then
-    [ ! -x /usr/bin/llvm-ar-21 ] && ln -sf "$(command -v $ar_name)" /usr/bin/llvm-ar-21
+# Ensure llvm-ar-21 exists (needed for LTO static library creation with clang-21)
+if ! command -v llvm-ar-21 &>/dev/null; then
+  # Install llvm package which provides llvm-ar-21
+  dnf install -y llvm 2>/dev/null || true
+  # Also try llvm-21 from llvm.org
+  dnf --enablerepo=llvm-21 install -y llvm-21 2>/dev/null || true
+fi
+# Find llvm-ar-21 in all known paths
+for candidate in /opt/llvm/bin/llvm-ar-21 /usr/bin/llvm-ar-21 /usr/local/bin/llvm-ar-21; do
+  if [ -x "$candidate" ]; then
+    [ ! -x /usr/bin/llvm-ar-21 ] && ln -sf "$candidate" /usr/bin/llvm-ar-21
     break
   fi
 done
+# Also create llvm-ranlib-21 if needed
+if ! command -v llvm-ranlib-21 &>/dev/null && command -v llvm-ar-21 &>/dev/null; then
+  ln -sf "$(command -v llvm-ar-21)" /usr/bin/llvm-ranlib-21 2>/dev/null || true
+fi
 command -v ld.lld &>/dev/null && echo "ld.lld: $(command -v ld.lld)" || echo "WARNING: ld.lld not found"
 command -v llvm-ar-21 &>/dev/null && echo "llvm-ar-21: $(command -v llvm-ar-21)" || echo "WARNING: llvm-ar-21 not found"
+command -v llvm-ranlib-21 &>/dev/null && echo "llvm-ranlib-21: $(command -v llvm-ranlib-21)" || echo "WARNING: llvm-ranlib-21 not found"
 # Redis core stays on gcc; RediSearch CMake/Rust finds clang-21 via PATH
 if [ -x /opt/llvm-21.1.8/bin/clang ]; then export PATH="/opt/llvm-21.1.8/bin:$PATH"; fi
 # Don't export CC/CXX globally — breaks core jemalloc with GNU ld
