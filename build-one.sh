@@ -38,27 +38,19 @@ if ! command -v clang-21 &>/dev/null; then
   fi
 fi
 # Ensure ld.lld is available for clang-21 -fuse-ld=lld
-if ! command -v ld.lld &>/dev/null; then
-  # Install lld package (provides ld.lld on RHEL 9+)
-  dnf install -y lld 2>/dev/null || true
+# The llvm.org installation provides real ld.lld at /opt/llvm/bin/
+if [ -x /opt/llvm/bin/ld.lld ]; then
+  ln -sf /opt/llvm/bin/ld.lld /usr/bin/ld.lld
+  ln -sf /opt/llvm/bin/ld.lld /usr/bin/ld.lld-21
 fi
-# Find and symlink ld.lld if not in PATH
-if ! command -v ld.lld &>/dev/null; then
-  for candidate in /usr/bin/ld.lld /usr/local/bin/ld.lld /opt/llvm/bin/ld.lld; do
-    if [ -x "$candidate" ]; then
-      ln -sf "$candidate" /usr/bin/ld.lld
-      break
-    fi
-  done
-  # Also try lld-21 binary name
-  if ! command -v ld.lld &>/dev/null && command -v lld-21 &>/dev/null; then
-    ln -sf "$(command -v lld-21)" /usr/bin/ld.lld
+# Fallback: check system paths
+for p in /opt/llvm/bin/ld.lld /usr/bin/ld.lld /usr/local/bin/ld.lld; do
+  if [ -x "$p" ]; then
+    [ ! -x /usr/bin/ld.lld ] && ln -sf "$p" /usr/bin/ld.lld
+    [ ! -x /usr/bin/ld.lld-21 ] && ln -sf "$p" /usr/bin/ld.lld-21
+    break
   fi
-fi
-# Also create ld.lld-21 symlink (cmake -fuse-ld=lld-21 needs this)
-if ! command -v ld.lld-21 &>/dev/null && command -v ld.lld &>/dev/null; then
-  ln -sf "$(command -v ld.lld)" /usr/bin/ld.lld-21
-fi
+done
 command -v ld.lld &>/dev/null && echo "ld.lld: $(command -v ld.lld)" || echo "WARNING: ld.lld not found"
 command -v ld.lld-21 &>/dev/null && echo "ld.lld-21: $(command -v ld.lld-21)" || echo "WARNING: ld.lld-21 not found"
 # Redis core stays on gcc; RediSearch CMake/Rust finds clang-21 via PATH
