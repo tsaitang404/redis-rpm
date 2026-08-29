@@ -56,8 +56,8 @@ done
 ln -sf redis-server "$DESTDIR/usr/bin/redis-sentinel"
 cp redis.conf "$DESTDIR/etc/redis/" 2>/dev/null || true
 cp sentinel.conf "$DESTDIR/etc/redis/sentinel/" 2>/dev/null || true
-[ -f src/systemd-redis_server.service ] && install -m 644 src/systemd-redis_server.service "$DESTDIR/usr/lib/systemd/system/redis.service"
-[ -f src/systemd-redis_sentinel.service ] && install -m 644 src/systemd-redis_sentinel.service "$DESTDIR/usr/lib/systemd/system/redis-sentinel.service"
+[ -f utils/systemd-redis_server.service ] && install -m 644 utils/systemd-redis_server.service "$DESTDIR/usr/lib/systemd/system/redis.service"
+if [ -f utils/systemd-redis_sentinel.service ]; then install -m 644 utils/systemd-redis_sentinel.service "$DESTDIR/usr/lib/systemd/system/redis-sentinel.service"; else install -m 644 utils/systemd-redis_server.service "$DESTDIR/usr/lib/systemd/system/redis-sentinel.service"; sed -i "s/redis-server \/etc\/redis\/redis.conf/redis-server \/etc\/redis\/sentinel\/sentinel.conf --sentinel/" "$DESTDIR/usr/lib/systemd/system/redis-sentinel.service"; fi
 
 # Modules
 if [ "$MAJOR" -ge 8 ]; then
