@@ -81,8 +81,8 @@ ln -sf redis-server %{buildroot}/usr/bin/redis-sentinel
 cp /usr/local/etc/redis/redis.conf %{buildroot}/etc/redis/ 2>/dev/null || cp redis.conf %{buildroot}/etc/redis/ 2>/dev/null || true
 cp /usr/local/etc/redis/sentinel.conf %{buildroot}/etc/redis/sentinel/ 2>/dev/null || cp sentinel.conf %{buildroot}/etc/redis/sentinel/ 2>/dev/null || true
 # Systemd
-[ -f src/systemd-redis_server.service ] && install -m 644 -D src/systemd-redis_server.service %{buildroot}/usr/lib/systemd/system/redis.service
-[ -f src/systemd-redis_sentinel.service ] && install -m 644 -D src/systemd-redis_sentinel.service %{buildroot}/usr/lib/systemd/system/redis-sentinel.service
+if [ -f src/systemd-redis_server.service ]; then install -m 644 -D src/systemd-redis_server.service %{buildroot}/usr/lib/systemd/system/redis.service; fi
+if [ -f src/systemd-redis_sentinel.service ]; then install -m 644 -D src/systemd-redis_sentinel.service %{buildroot}/usr/lib/systemd/system/redis-sentinel.service; fi
 # Modules from make deploy — only copy actual module .so files, not Rust proc-macro libs
 if [ -d /usr/local/lib/redis/modules ]; then
   for so in /usr/local/lib/redis/modules/*.so; do
@@ -110,7 +110,7 @@ ls -la %{buildroot}/usr/lib/redis/modules/ 2>/dev/null || true
 /usr/bin/redis-sentinel
 /usr/lib/redis/modules/
 /usr/lib/systemd/system/redis.service
-/usr/lib/systemd/system/redis-sentinel.service
+%ghost /usr/lib/systemd/system/redis-sentinel.service
 %config(noreplace) /etc/redis/redis.conf
 %config(noreplace) /etc/redis/sentinel/
 /usr/share/selinux/packages/
@@ -132,5 +132,5 @@ SPEC
 
 sed -i "s/REPLACE_VERSION/${VERSION}/" "$SPEC_FILE"
 rpmbuild -bb --noclean "$SPEC_FILE" 2>&1 | tail -5
-cp ~/rpmbuild/RPMS/x86_64/*.rpm /out/ 2>/dev/null || cp ~/rpmbuild/RPMS/*/*.rpm /out/ 2>/dev/null
+cp ~/rpmbuild/RPMS/x86_64/*.rpm /out/ 2>/dev/null || cp $(find ~/rpmbuild/RPMS -name "*.rpm") /out/ 2>/dev/null || true
 echo "=== Done ==="
