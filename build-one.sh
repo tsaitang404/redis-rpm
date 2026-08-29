@@ -32,7 +32,7 @@ for ts in 15 14 13; do
   [ -f "/etc/profile.d/gcc-toolset-${ts}.sh" ] && source "/etc/profile.d/gcc-toolset-${ts}.sh" && break
 done 2>/dev/null || true
 
-# --- Build ---
+# Build
 export BUILD_TLS=yes USE_SYSTEMD=yes
 if command -v clang &>/dev/null; then export LTO=1; else export LTO=0; fi
 
@@ -44,46 +44,39 @@ else
   make -j"$(nproc)"
 fi
 
-# --- Install to staging ---
+# Stage files
 DESTDIR=/tmp/staging
-PREFIX=/usr
-mkdir -p "$DESTDIR$PREFIX/bin" "$DESTDIR$PREFIX/lib/redis/modules" "$DESTDIR/etc/redis/sentinel" "$DESTDIR/var/lib/redis" "$DESTDIR/var/log/redis" "$DESTDIR/run/redis" "$DESTDIR/run/sentinel" "$DESTDIR$PREFIX/lib/systemd/system" "$DESTDIR/usr/share/selinux/packages"
+mkdir -p "$DESTDIR/usr/bin" "$DESTDIR/usr/lib/redis/modules" "$DESTDIR/etc/redis/sentinel" \
+  "$DESTDIR/var/lib/redis" "$DESTDIR/var/log/redis" "$DESTDIR/run/redis" "$DESTDIR/run/sentinel" \
+  "$DESTDIR/usr/lib/systemd/system" "$DESTDIR/usr/share/selinux/packages"
 
-# Binaries
 for bin in redis-server redis-cli redis-benchmark redis-check-rdb redis-check-aof; do
-  if [ -f src/$bin ]; then
-    install -m 755 src/$bin "$DESTDIR$PREFIX/bin/"
-  fi
+  [ -f src/$bin ] && install -m 755 src/$bin "$DESTDIR/usr/bin/"
 done
-ln -sf redis-server "$DESTDIR$PREFIX/bin/redis-sentinel"
-
-# Config
+ln -sf redis-server "$DESTDIR/usr/bin/redis-sentinel"
 cp redis.conf "$DESTDIR/etc/redis/" 2>/dev/null || true
 cp sentinel.conf "$DESTDIR/etc/redis/sentinel/" 2>/dev/null || true
+[ -f src/systemd-redis_server.service ] && install -m 644 src/systemd-redis_server.service "$DESTDIR/usr/lib/systemd/system/redis.service"
+[ -f src/systemd-redis_sentinel.service ] && install -m 644 src/systemd-redis_sentinel.service "$DESTDIR/usr/lib/systemd/system/redis-sentinel.service"
 
-# Systemd
-[ -f src/systemd-redis_server.service ] && install -m 644 -D src/systemd-redis_server.service "$DESTDIR$PREFIX/lib/systemd/system/redis.service"
-[ -f src/systemd-redis_sentinel.service ] && install -m 644 -D src/systemd-redis_sentinel.service "$DESTDIR$PREFIX/lib/systemd/system/redis-sentinel.service"
-
-# Modules — use find to get .so files from module build dirs, exclude lib* (Rust proc-macro)
+# Modules
 if [ "$MAJOR" -ge 8 ]; then
   for mod_dir in modules/*/; do
     [ -d "$mod_dir" ] || continue
     mod_name=$(basename "$mod_dir")
-    so_file=$(find "$mod_dir" -maxdepth 3 -name "*.so" ! -name "lib*" ! -name "libevent*" -print -quit 2>/dev/null)
+    so_file=$(find "$mod_dir" -maxdepth 3 -name "*.so" ! -name "lib*" -print -quit 2>/dev/null)
     if [ -n "$so_file" ]; then
-      cp "$so_file" "$DESTDIR$PREFIX/lib/redis/modules/${mod_name}.so"
-      echo "  module: ${mod_name}.so <- $so_file"
-    else
-      echo "  module: ${mod_name} — no .so found"
+      cp "$so_file" "$DESTDIR/usr/lib/redis/modules/${mod_name}.so"
+      echo "  module: ${mod_name}.so"
     fi
   done
 fi
 
-# SELinux
 [ -d selinux ] && cp selinux/* "$DESTDIR/usr/share/selinux/packages/" 2>/dev/null || true
 
-echo "=== Staging contents ==="
-ls -la "$DESTDIR$PREFIX/bin/"
-ls -la "$DESTDIR$PREFIX/lib/redis/modules/"
+# Verify
+echo "=== Staged binaries ==="
+ls "$DESTDIR/usr/bin/"
+echo "=== Staged modules ==="
+ls "$DESTDIR/usr/lib/redis/modules/"
 echo "=== Done ==="

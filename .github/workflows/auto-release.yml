@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Redis version tag (e.g. 8.10.1) or 'unstable'"
+        description: "Redis version tag"
         required: true
 jobs:
   check-upstream:
@@ -34,26 +34,19 @@ jobs:
           docker pull ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-${{ github.sha }}-amd64 2>/dev/null || \
           docker pull ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-unstable 2>/dev/null || \
           echo "NEED_BUILD=true" >> $GITHUB_ENV
-      - name: Build builder image (fallback)
+      - name: Build builder image
         if: env.NEED_BUILD == 'true'
         run: |
           docker build -t ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-unstable -f dockerfiles/Dockerfile.${{ matrix.distro }}${{ matrix.version }} .
           docker push ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-unstable || true
-      - name: Build and package RPM
+      - name: Build and package
         env:
           REDIS_VERSION: ${{ needs.check-upstream.outputs.tag }}
         run: |
           IMAGE="ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-${{ github.sha }}-amd64"
-          docker image inspect "$IMAGE" &>/dev/null || \
-            IMAGE="ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-unstable"
+          docker image inspect "$IMAGE" &>/dev/null || IMAGE="ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-unstable"
           mkdir -p dist
-          docker run --rm -v "$PWD:/workspace" -w /workspace -e REDIS_VERSION="$REDIS_VERSION" "$IMAGE" bash -c '
-            bash /workspace/build-one.sh && \
-            mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS} && \
-            sed "s/REPLACE_VERSION/$REDIS_VERSION/g" /workspace/templates/redis.spec.tpl > /tmp/redis.spec && \
-            rpmbuild -bb --noclean --buildroot /tmp/staging /tmp/redis.spec 2>&1 | tail -10 && \
-            find /tmp/rpmbuild/RPMS -name "*.rpm" -exec cp {} /workspace/dist/ \;
-          '
+          docker run --rm -v "$PWD:/workspace" -w /workspace -e REDIS_VERSION="$REDIS_VERSION" "$IMAGE" bash -c 'bash /workspace/build-one.sh && bash /workspace/rpm-build.sh'
           ls -lh dist/
       - uses: actions/upload-artifact@v4
         with:
@@ -69,7 +62,7 @@ jobs:
         with:
           path: artifacts/
           merge-multiple: true
-      - name: Create/Update Release
+      - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.check-upstream.outputs.tag }}
@@ -77,7 +70,7 @@ jobs:
           mkdir -p release
           find artifacts/ -name "*.rpm" -exec cp {} release/ \;
           ls -lh release/
-          if [ -z "$(ls release/*.rpm 2>/dev/null)" ]; then echo "No RPMs found!"; exit 1; fi
+          if [ -z "$(ls release/*.rpm 2>/dev/null)" ]; then echo "No RPMs!"; exit 1; fi
           if gh release view "$TAG" --repo ${{ github.repository }} &>/dev/null; then
             gh release upload "$TAG" release/*.rpm --repo ${{ github.repository }} --clobber
           else
