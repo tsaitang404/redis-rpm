@@ -3,7 +3,7 @@ set -ex
 VERSION="${REDIS_VERSION:?}"
 # Fresh copy of staging (rpmbuild wipes buildroot)
 rm -rf /tmp/staging-copy && cp -a /tmp/staging /tmp/staging-copy
-mkdir -p /tmp/rpmbuild/{BUILDROOT,RPMS,SPECS}
+mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 cat > /tmp/rpmbuild/redis.spec << EOF
 %define _topdir /tmp/rpmbuild
 Name: redis
