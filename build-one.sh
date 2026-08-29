@@ -15,8 +15,8 @@ else
 fi
 
 # --- Install prerequisites ---
-# rpmbuild
-command -v rpmbuild || dnf install -y -q rpm-build 2>&1 | tail -1
+# Basic build tools + rpmbuild
+dnf install -y -q make gcc rpm-build curl git tar gzip which findutils 2>&1 | tail -1
 
 # GCC toolset (el8/9)
 for ts in 15 14 13; do
