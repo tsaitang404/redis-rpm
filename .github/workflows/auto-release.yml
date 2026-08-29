@@ -39,7 +39,7 @@ jobs:
         run: |
           docker build -t ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-unstable -f dockerfiles/Dockerfile.${{ matrix.distro }}${{ matrix.version }} .
           docker push ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-unstable || true
-      - name: Build and package
+      - name: Build and package RPM
         env:
           REDIS_VERSION: ${{ needs.check-upstream.outputs.tag }}
         run: |
@@ -47,14 +47,11 @@ jobs:
           docker image inspect "$IMAGE" &>/dev/null || \
             IMAGE="ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-unstable"
           mkdir -p dist
-          # Build Redis and modules
-          docker run --rm -v "$PWD:/workspace" -w /workspace -e REDIS_VERSION="$REDIS_VERSION" "$IMAGE" bash /workspace/build-one.sh
-          # Package as RPM using spec template
-          sed "s/REPLACE_VERSION/$REDIS_VERSION/g" templates/redis.spec.tpl > dist/redis.spec
-          docker run --rm -v "$PWD:/workspace" -v "/tmp/staging:/tmp/staging" -w /workspace \
-            -e REDIS_VERSION="$REDIS_VERSION" "$IMAGE" bash -c '
-            mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
-            rpmbuild -bb --noclean --buildroot /tmp/staging /workspace/dist/redis.spec 2>&1 | tail -10
+          docker run --rm -v "$PWD:/workspace" -w /workspace -e REDIS_VERSION="$REDIS_VERSION" "$IMAGE" bash -c '
+            bash /workspace/build-one.sh && \
+            mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS} && \
+            sed "s/REPLACE_VERSION/$REDIS_VERSION/g" /workspace/templates/redis.spec.tpl > /tmp/redis.spec && \
+            rpmbuild -bb --noclean --buildroot /tmp/staging /tmp/redis.spec 2>&1 | tail -10 && \
             find /tmp/rpmbuild/RPMS -name "*.rpm" -exec cp {} /workspace/dist/ \;
           '
           ls -lh dist/
@@ -80,6 +77,7 @@ jobs:
           mkdir -p release
           find artifacts/ -name "*.rpm" -exec cp {} release/ \;
           ls -lh release/
+          if [ -z "$(ls release/*.rpm 2>/dev/null)" ]; then echo "No RPMs found!"; exit 1; fi
           if gh release view "$TAG" --repo ${{ github.repository }} &>/dev/null; then
             gh release upload "$TAG" release/*.rpm --repo ${{ github.repository }} --clobber
           else
