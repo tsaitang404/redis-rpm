@@ -37,18 +37,25 @@ if ! command -v clang-21 &>/dev/null; then
     dnf install -y clang-tools-extra-21 clang-21 lld-21 2>/dev/null ||       dnf --enablerepo=llvm-21 install -y clang-21 lld-21 2>/dev/null || true
   fi
 fi
-# Ensure lld is available for clang-21 -fuse-ld=lld
+# Ensure ld.lld is available for clang-21 -fuse-ld=lld
 if ! command -v ld.lld &>/dev/null; then
-  if command -v lld-21 &>/dev/null; then
+  # Install lld package (provides ld.lld on RHEL 9+)
+  dnf install -y lld 2>/dev/null || true
+fi
+# Find and symlink ld.lld if not in PATH
+if ! command -v ld.lld &>/dev/null; then
+  for candidate in /usr/bin/ld.lld /usr/local/bin/ld.lld /opt/llvm/bin/ld.lld; do
+    if [ -x "$candidate" ]; then
+      ln -sf "$candidate" /usr/bin/ld.lld
+      break
+    fi
+  done
+  # Also try lld-21 binary name
+  if ! command -v ld.lld &>/dev/null && command -v lld-21 &>/dev/null; then
     ln -sf "$(command -v lld-21)" /usr/bin/ld.lld
-  elif command -v lld &>/dev/null; then
-    ln -sf "$(command -v lld)" /usr/bin/ld.lld
-  else
-    dnf install -y lld 2>/dev/null || true
-    command -v lld &>/dev/null && ln -sf "$(command -v lld)" /usr/bin/ld.lld || true
   fi
 fi
-command -v ld.lld &>/dev/null || echo "WARNING: ld.lld not found"
+command -v ld.lld &>/dev/null && echo "ld.lld: $(command -v ld.lld)" || echo "WARNING: ld.lld not found"
 # Redis core stays on gcc; RediSearch CMake/Rust finds clang-21 via PATH
 if [ -x /opt/llvm-21.1.8/bin/clang ]; then export PATH="/opt/llvm-21.1.8/bin:$PATH"; fi
 # Don't export CC/CXX globally — breaks core jemalloc with GNU ld
