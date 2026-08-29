@@ -44,14 +44,11 @@ Redis core + available bundled modules.
 
 %build
 MAJOR=$(echo "REPLACE_VERSION" | cut -d. -f1)
-# Build core first (always succeeds)
-make -C src all -j$(nproc)
-# Build modules for 8.x (continue on failure)
 if [ "$MAJOR" -ge 8 ]; then
-  make bootstrap 2>&1 | tail -5 || true
-  for mod in redisbloom redistimeseries redisearch redisjson; do
-    [ -d "modules/$mod" ] && make -C modules/$mod -j$(nproc) 2>&1 | tail -3 || echo "==> $mod: FAILED"
-  done
+  # 'make build' handles core + modules; module failures are non-fatal
+  make build -j$(nproc) || make -C src all -j$(nproc)
+else
+  make -j$(nproc)
 fi
 
 %install
@@ -63,10 +60,8 @@ install -m 755 src/redis-benchmark %{buildroot}/usr/bin/
 install -m 755 src/redis-check-aof %{buildroot}/usr/bin/
 install -m 755 src/redis-check-rdb %{buildroot}/usr/bin/
 ln -s redis-server %{buildroot}/usr/bin/redis-sentinel
-# Install available module .so files
-for so in bin/linux-*-release/*.so bin/linux-*-release/search-community/*.so; do
-  [ -f "$so" ] && install -m 755 "$so" %{buildroot}/usr/lib/redis/modules/
-done
+# Install available module .so files from all possible locations
+find . -name "*.so" -path "*/bin/*release*" ! -path "./src/*" -exec install -m 755 {} %{buildroot}/usr/lib/redis/modules/ \; 2>/dev/null || true
 install -m 640 redis.conf %{buildroot}/etc/redis/redis.conf
 install -m 640 sentinel.conf %{buildroot}/etc/redis/sentinel/sentinel.conf
 cat > %{buildroot}/usr/lib/systemd/system/redis.service <<'SVC'
