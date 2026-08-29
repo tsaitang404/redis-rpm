@@ -16,7 +16,7 @@ fi
 
 # --- Install prerequisites ---
 # Basic build tools + rpmbuild
-dnf install -y -q make gcc gcc-c++ rpm-build curl wget git tar gzip which findutils openssl-devel systemd-devel 2>&1 | tail -1
+dnf install -y --allowerasing make gcc gcc-c++ rpm-build curl wget git tar gzip findutils openssl-devel systemd-devel || true
 
 # GCC toolset (el8/9)
 for ts in 15 14 13; do
@@ -29,7 +29,7 @@ if [ -x /opt/llvm/bin/clang ]; then
 elif [ -x /opt/llvm-21.1.8/bin/clang ]; then
   export PATH="/opt/llvm-21.1.8/bin:$PATH"
 fi
-command -v lld-21 2>/dev/null || command -v lld 2>/dev/null || dnf install -y -q lld 2>&1 | tail -1
+command -v lld-21 2>/dev/null || command -v lld 2>/dev/null || (dnf install -y lld || true)
 
 export BUILD_TLS=yes USE_SYSTEMD=yes
 # LTO only when LLVM available
@@ -80,7 +80,7 @@ if [ "$MAJOR" -ge 8 ] && [ -f modules/modules.yaml ]; then
   done 2>/dev/null || true
   [ -x /opt/llvm/bin/clang ] && export PATH="/opt/llvm/bin:$PATH"
   [ -x /opt/llvm-21.1.8/bin/clang ] && export PATH="/opt/llvm-21.1.8/bin:$PATH"
-  command -v lld-21 2>/dev/null || command -v lld 2>/dev/null || dnf install -y -q lld 2>&1 | tail -1
+  command -v lld-21 2>/dev/null || command -v lld 2>/dev/null || (dnf install -y lld || true)
   # Install LLVM if missing (for RediSearch)
   if ! command -v clang-21 &>/dev/null && ! command -v clang &>/dev/null; then
     dnf install -y -q clang lld 2>&1 | tail -1 || true
