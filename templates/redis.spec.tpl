@@ -15,7 +15,7 @@ BuildRequires:    systemd
 %description
 Redis REPLACE_VERSION with bundled modules.
 %install
-cp -a /tmp/staging/* %{buildroot}/
+# Files already staged in buildroot
 %files
 /usr/bin/
 /usr/lib/redis/modules/
