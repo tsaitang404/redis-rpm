@@ -37,8 +37,9 @@ if ! command -v clang-21 &>/dev/null; then
     dnf install -y clang-tools-extra-21 clang-21 lld-21 2>/dev/null ||       dnf --enablerepo=llvm-21 install -y clang-21 lld-21 2>/dev/null || true
   fi
 fi
-# Create lld symlink so clang-21 finds it as "lld"
-if command -v lld-21 &>/dev/null && ! command -v lld &>/dev/null; then
+# Create ld.lld symlink so clang-21 -fuse-ld=lld works
+if command -v lld-21 &>/dev/null; then
+  ln -sf "$(command -v lld-21)" /usr/local/bin/ld.lld 2>/dev/null || true
   ln -sf "$(command -v lld-21)" /usr/local/bin/lld 2>/dev/null || true
 fi
 # Redis core stays on gcc; RediSearch CMake/Rust finds clang-21 via PATH
