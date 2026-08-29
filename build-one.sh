@@ -4,6 +4,13 @@ VERSION="${REDIS_VERSION:?REDIS_VERSION not set}"
 # Install rpmbuild if missing
 command -v rpmbuild || dnf install -y -q rpm-build 2>&1 | tail -1
 
+# Install Rust toolchain for RedisJSON/RediSearch
+if ! command -v rustc &>/dev/null; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable 2>&1 | tail -3
+  export PATH="$HOME/.cargo/bin:$PATH"
+  rustc --version
+fi
+
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
 # --- fetch source ---
