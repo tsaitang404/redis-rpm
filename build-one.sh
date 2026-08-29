@@ -37,6 +37,11 @@ if ! command -v clang-21 &>/dev/null; then
     dnf install -y clang-tools-extra-21 clang-21 lld-21 2>/dev/null ||       dnf --enablerepo=llvm-21 install -y clang-21 lld-21 2>/dev/null || true
   fi
 fi
+# Explicitly ensure lld-21 is installed (may be separate package)
+if ! command -v lld-21 &>/dev/null; then
+  MAJOR_NUM=$(rpm -E %{rhel} 2>/dev/null || echo 9)
+  dnf install -y lld-21 2>/dev/null ||     dnf --enablerepo=llvm-21 install -y lld-21 2>/dev/null || true
+fi
 # Create ld.lld symlink so clang-21 -fuse-ld=lld works
 if command -v lld-21 &>/dev/null; then
   ln -sf "$(command -v lld-21)" /usr/bin/ld.lld 2>/dev/null || true
