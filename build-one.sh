@@ -37,8 +37,9 @@ if ! command -v clang-21 &>/dev/null; then
     dnf install -y clang-tools-extra-21 clang-21 lld-21 2>/dev/null ||       dnf --enablerepo=llvm-21 install -y clang-21 lld-21 2>/dev/null || true
   fi
 fi
-command -v clang-21 &>/dev/null && export CC=clang-21 CXX=clang++-21
+# Redis core stays on gcc; RediSearch CMake/Rust finds clang-21 via PATH
 if [ -x /opt/llvm-21.1.8/bin/clang ]; then export PATH="/opt/llvm-21.1.8/bin:$PATH"; fi
+# Don't export CC/CXX globally — breaks core jemalloc with GNU ld
 
 # Rust for RedisJSON
 if ! command -v rustc &>/dev/null; then
