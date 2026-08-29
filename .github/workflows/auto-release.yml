@@ -5,9 +5,6 @@ on:
       release_tag:
         description: "Redis version tag (e.g. 8.10.1) or 'unstable'"
         required: true
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/builder
 jobs:
   check-upstream:
     runs-on: ubuntu-latest
@@ -34,24 +31,65 @@ jobs:
       - uses: actions/checkout@v4
       - name: Pull builder image
         run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}${{ matrix.version }}-${{ github.sha }}-amd64 2>/dev/null || \
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}${{ matrix.version }}-unstable 2>/dev/null || \
+          docker pull ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-${{ github.sha }}-amd64 2>/dev/null || \
+          docker pull ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-unstable 2>/dev/null || \
           echo "NEED_BUILD=true" >> $GITHUB_ENV
       - name: Build builder image (fallback)
         if: env.NEED_BUILD == 'true'
         run: |
-          docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}${{ matrix.version }}-unstable -f dockerfiles/Dockerfile.${{ matrix.distro }}${{ matrix.version }} .
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}${{ matrix.version }}-unstable || true
+          docker build -t ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-unstable -f dockerfiles/Dockerfile.${{ matrix.distro }}${{ matrix.version }} .
+          docker push ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-unstable || true
       - name: Build RPM
         env:
           REDIS_VERSION: ${{ needs.check-upstream.outputs.tag }}
         run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}${{ matrix.version }}-${{ github.sha }}-amd64"
+          IMAGE="ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-${{ github.sha }}-amd64"
           docker image inspect "$IMAGE" &>/dev/null || \
-            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}${{ matrix.version }}-unstable"
+            IMAGE="ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-unstable"
           mkdir -p dist
           docker run --rm -v "$PWD:/workspace" -w /workspace -e REDIS_VERSION="$REDIS_VERSION" "$IMAGE" bash /workspace/build-one.sh
-          cp /tmp/*.rpm dist/ 2>/dev/null || true
+          # Package with nfpm or rpmbuild
+          docker run --rm -v "$PWD:/workspace" -w /workspace -e REDIS_VERSION="$REDIS_VERSION" "$IMAGE" bash -c '
+            cd /tmp/staging
+            # Use rpmbuild to create RPM from staging
+            mkdir -p /tmp/rpm-build/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+            cat > /tmp/rpm-build/redis.spec << SPEC
+Name: redis
+Version: '"$REDIS_VERSION"'
+Release: 1
+Summary: Redis with bundled modules
+License: SSPLv1
+Requires(pre): shadow-utils
+Requires(post): systemd
+Requires(preun): systemd
+Requires(postun): systemd
+BuildRequires: systemd
+%define debug_package %{nil}
+%global _enable_debug_package 0
+%global __os_install_post %{nil}
+%description
+Redis '"$REDIS_VERSION"'
+%install
+cp -a /tmp/staging/* %{buildroot}/
+%files
+/usr/bin/
+/usr/lib/redis/modules/
+/usr/lib/systemd/system/
+%config(noreplace) /etc/redis/
+/var/
+/run/
+/usr/share/selinux/
+%pre
+getent group redis &>/dev/null || groupadd -r redis
+getent passwd redis &>/dev/null || useradd -r -g redis -d /var/lib/redis -s /sbin/nologin redis
+%post
+systemctl daemon-reload
+SPEC
+            rpmbuild -bb --noclean --buildroot /tmp/staging /tmp/rpm-build/redis.spec
+            cp /tmp/rpm-build/RPMS/x86_64/*.rpm /workspace/dist/ 2>/dev/null || \
+            find /tmp/rpm-build/RPMS -name "*.rpm" -exec cp {} /workspace/dist/ \;
+          '
+          ls -lh dist/
       - uses: actions/upload-artifact@v4
         with:
           name: redis-rpm-${{ matrix.distro }}${{ matrix.version }}
@@ -59,7 +97,6 @@ jobs:
   publish:
     needs: [check-upstream, build-rpm]
     runs-on: ubuntu-latest
-    if: needs.check-upstream.outputs.tag != ''
     permissions:
       contents: write
     steps:
