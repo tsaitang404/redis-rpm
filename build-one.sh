@@ -1,7 +1,6 @@
 #!/bin/bash
 set -ex
 VERSION="${REDIS_VERSION:?REDIS_VERSION not set}"
-ARCH=$(uname -m)
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
 # --- fetch source ---
@@ -10,7 +9,6 @@ if [ "$MAJOR" -ge 8 ]; then
   git clone --depth 1 --branch "$VERSION" https://github.com/redis/redis.git "redis-${VERSION}" 2>&1 | tail -3
   cd "redis-${VERSION}"
   git submodule update --init --recursive 2>&1 | tail -5 || true
-  make bootstrap 2>&1 | tail -5 || true
 else
   wget -q "https://download.redis.io/releases/redis-${VERSION}.tar.gz"
   tar xzf "redis-${VERSION}.tar.gz"
@@ -20,23 +18,15 @@ fi
 mkdir -p /workspace/dist ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 tar czf ~/rpmbuild/SOURCES/redis-${VERSION}.tar.gz -C /tmp "redis-${VERSION}"
 
-# Build core + modules separately
-make -C src all -j$(nproc)
-if [ "$MAJOR" -ge 8 ]; then
-  for mod in redisbloom redistimeseries redisearch redisjson; do
-    [ -d "modules/$mod" ] && make -C modules/$mod -j$(nproc) 2>&1 | tail -3 || echo "==> $mod: FAILED (continuing)"
-  done
-fi
-
-cat > ~/rpmbuild/SPECS/redis.spec <<SPECEOF
+cat > ~/rpmbuild/SPECS/redis.spec <<'SPECEOF'
 %define debug_package %{nil}
 Name:           redis
-Version:        ${VERSION}
+Version:        REPLACE_VERSION
 Release:        1%{?dist}
 Summary:        Redis in-memory key-value database
 License:        BSD-3-Clause
 URL:            https://redis.io
-Source0:        redis-${VERSION}.tar.gz
+Source0:        redis-REPLACE_VERSION.tar.gz
 BuildRequires:  gcc, make
 
 %description
@@ -46,7 +36,16 @@ Redis core + available bundled modules.
 %setup -q
 
 %build
-# Core already built in build-one.sh, skip rpmbuild %build
+MAJOR=$(echo "REPLACE_VERSION" | cut -d. -f1)
+# Build core first (always succeeds)
+make -C src all -j$(nproc)
+# Build modules for 8.x (continue on failure)
+if [ "$MAJOR" -ge 8 ]; then
+  make bootstrap 2>&1 | tail -5 || true
+  for mod in redisbloom redistimeseries redisearch redisjson; do
+    [ -d "modules/$mod" ] && make -C modules/$mod -j$(nproc) 2>&1 | tail -3 || echo "==> $mod: FAILED"
+  done
+fi
 
 %install
 rm -rf %{buildroot}
@@ -57,15 +56,12 @@ install -m 755 src/redis-benchmark %{buildroot}/usr/bin/
 install -m 755 src/redis-check-aof %{buildroot}/usr/bin/
 install -m 755 src/redis-check-rdb %{buildroot}/usr/bin/
 ln -s redis-server %{buildroot}/usr/bin/redis-sentinel
-
 # Install available module .so files
 for so in bin/linux-*-release/*.so bin/linux-*-release/search-community/*.so; do
   [ -f "$so" ] && install -m 755 "$so" %{buildroot}/usr/lib/redis/modules/
 done
-
 install -m 640 redis.conf %{buildroot}/etc/redis/redis.conf
 install -m 640 sentinel.conf %{buildroot}/etc/redis/sentinel/sentinel.conf
-
 cat > %{buildroot}/usr/lib/systemd/system/redis.service <<'SVC'
 [Unit]
 Description=Advanced key-value store
@@ -96,7 +92,6 @@ ReadWriteDirectories=-/etc/redis
 [Install]
 WantedBy=multi-user.target
 SVC
-
 cat > %{buildroot}/usr/lib/systemd/system/redis-sentinel.service <<'SVC'
 [Unit]
 Description=Advanced key-value store
@@ -127,7 +122,6 @@ ReadWriteDirectories=-/etc/redis
 [Install]
 WantedBy=multi-user.target
 SVC
-
 cat > %{buildroot}/usr/share/selinux/packages/redis-ce.te <<'SE'
 module redis-ce 1.0;
 require { type redis_t; type redis_conf_t; class file { read write open }; }
@@ -167,6 +161,8 @@ command -v chcon &>/dev/null && chcon -t redis_conf_t /etc/redis/sentinel /etc/r
 /usr/share/selinux/packages/redis-ce.te
 /usr/share/selinux/packages/redis-ce.fc
 SPECEOF
+
+sed -i "s/REPLACE_VERSION/${VERSION}/g" ~/rpmbuild/SPECS/redis.spec
 
 rpmbuild -bb ~/rpmbuild/SPECS/redis.spec --define '__os_install_post %{nil}'
 find ~/rpmbuild/RPMS -name "*.rpm" ! -name "*debug*" -exec cp {} /workspace/dist/ \;
