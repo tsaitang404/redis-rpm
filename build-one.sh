@@ -39,8 +39,8 @@ if ! command -v clang-21 &>/dev/null; then
 fi
 # Create ld.lld symlink so clang-21 -fuse-ld=lld works
 if command -v lld-21 &>/dev/null; then
-  ln -sf "$(command -v lld-21)" /usr/local/bin/ld.lld 2>/dev/null || true
-  ln -sf "$(command -v lld-21)" /usr/local/bin/lld 2>/dev/null || true
+  ln -sf "$(command -v lld-21)" /usr/bin/ld.lld 2>/dev/null || true
+  ln -sf "$(command -v lld-21)" /usr/bin/lld 2>/dev/null || true
 fi
 # Redis core stays on gcc; RediSearch CMake/Rust finds clang-21 via PATH
 if [ -x /opt/llvm-21.1.8/bin/clang ]; then export PATH="/opt/llvm-21.1.8/bin:$PATH"; fi
