@@ -55,7 +55,12 @@ if ! command -v ld.lld &>/dev/null; then
     ln -sf "$(command -v lld-21)" /usr/bin/ld.lld
   fi
 fi
+# Also create ld.lld-21 symlink (cmake -fuse-ld=lld-21 needs this)
+if ! command -v ld.lld-21 &>/dev/null && command -v ld.lld &>/dev/null; then
+  ln -sf "$(command -v ld.lld)" /usr/bin/ld.lld-21
+fi
 command -v ld.lld &>/dev/null && echo "ld.lld: $(command -v ld.lld)" || echo "WARNING: ld.lld not found"
+command -v ld.lld-21 &>/dev/null && echo "ld.lld-21: $(command -v ld.lld-21)" || echo "WARNING: ld.lld-21 not found"
 # Redis core stays on gcc; RediSearch CMake/Rust finds clang-21 via PATH
 if [ -x /opt/llvm-21.1.8/bin/clang ]; then export PATH="/opt/llvm-21.1.8/bin:$PATH"; fi
 # Don't export CC/CXX globally — breaks core jemalloc with GNU ld
