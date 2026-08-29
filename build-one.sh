@@ -9,10 +9,11 @@ MAJOR=$(echo "$VERSION" | cut -d. -f1)
 # --- fetch source ---
 cd /tmp
 if [ "$MAJOR" -ge 8 ]; then
-  git clone --depth 1 --branch "$VERSION" https://github.com/redis/redis.git "redis-${VERSION}" 2>&1 | tail -3
+  git clone --recurse-submodules --shallow-submodules --depth 1 --branch "$VERSION" https://github.com/redis/redis.git "redis-${VERSION}" 2>&1 | tail -5
   cd "redis-${VERSION}"
-  git submodule update --init --recursive 2>&1 | tail -5 || true
-  # Create .prepared markers so rpmbuild (no .git) can find modules
+  # Verify modules cloned
+  ls -d modules/*/src 2>/dev/null || echo "WARNING: no module sources"
+  # Create .prepared markers for rpmbuild
   for mod in modules/*/src; do
     [ -d "$mod" ] && touch "$mod/.prepared"
   done
