@@ -1,6 +1,8 @@
 #!/bin/bash
 set -ex
 VERSION="${REDIS_VERSION:?}"
+# Fresh copy of staging (rpmbuild wipes buildroot)
+rm -rf /tmp/staging-copy && cp -a /tmp/staging /tmp/staging-copy
 mkdir -p /tmp/rpmbuild/{BUILDROOT,RPMS,SPECS}
 cat > /tmp/rpmbuild/redis.spec << EOF
 %define _topdir /tmp/rpmbuild
@@ -15,7 +17,7 @@ BuildArch: x86_64
 %description
 Redis with bundled modules
 %install
-cp -a /tmp/staging/* %{buildroot}/
+cp -a /tmp/staging-copy/* %{buildroot}/
 %files
 %dir /etc/redis
 %config(noreplace) /etc/redis/redis.conf
@@ -35,5 +37,5 @@ cp -a /tmp/staging/* %{buildroot}/
 %dir /run/sentinel
 /usr/share/selinux/packages
 EOF
-rpmbuild -bb --noclean --buildroot /tmp/staging /tmp/rpmbuild/redis.spec
+rpmbuild -bb --noclean --buildroot /tmp/rpmbuild/BUILDROOT/redis /tmp/rpmbuild/redis.spec
 cp /tmp/rpmbuild/RPMS/x86_64/*.rpm /workspace/dist/
