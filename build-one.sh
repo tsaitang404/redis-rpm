@@ -12,6 +12,10 @@ if [ "$MAJOR" -ge 8 ]; then
   git clone --depth 1 --branch "$VERSION" https://github.com/redis/redis.git "redis-${VERSION}" 2>&1 | tail -3
   cd "redis-${VERSION}"
   git submodule update --init --recursive 2>&1 | tail -5 || true
+  # Create .prepared markers so rpmbuild (no .git) can find modules
+  for mod in modules/*/src; do
+    [ -d "$mod" ] && touch "$mod/.prepared"
+  done
 else
   wget -q "https://download.redis.io/releases/redis-${VERSION}.tar.gz"
   tar xzf "redis-${VERSION}.tar.gz"
