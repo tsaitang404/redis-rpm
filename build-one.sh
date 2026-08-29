@@ -38,19 +38,35 @@ if ! command -v clang-21 &>/dev/null; then
   fi
 fi
 # Ensure ld.lld is available for clang-21 -fuse-ld=lld
-# The llvm.org installation provides real ld.lld at /opt/llvm/bin/
-if [ -x /opt/llvm/bin/ld.lld ]; then
-  ln -sf /opt/llvm/bin/ld.lld /usr/bin/ld.lld
-  ln -sf /opt/llvm/bin/ld.lld /usr/bin/ld.lld-21
+# On el9, llvm.org repo may not have lld-21; install explicitly
+if ! command -v ld.lld &>/dev/null && ! command -v ld.lld-21 &>/dev/null; then
+  MAJOR_NUM=$(rpm -E %{rhel} 2>/dev/null || echo 9)
+  # Try llvm.org lld-21 first
+  dnf --enablerepo=llvm-21 install -y lld-21 2>/dev/null || true
+  # Fallback: generic lld package (provides ld.lld on RHEL 9+)
+  if ! command -v ld.lld &>/dev/null; then
+    dnf install -y lld 2>/dev/null || true
+  fi
 fi
-# Fallback: check system paths
-for p in /opt/llvm/bin/ld.lld /usr/bin/ld.lld /usr/local/bin/ld.lld; do
-  if [ -x "$p" ]; then
-    [ ! -x /usr/bin/ld.lld ] && ln -sf "$p" /usr/bin/ld.lld
-    [ ! -x /usr/bin/ld.lld-21 ] && ln -sf "$p" /usr/bin/ld.lld-21
+# Find ld.lld in all known paths
+LLD_FOUND=0
+for candidate in /opt/llvm/bin/ld.lld /usr/bin/ld.lld /usr/local/bin/ld.lld; do
+  if [ -x "$candidate" ]; then
+    [ ! -x /usr/bin/ld.lld ] && ln -sf "$candidate" /usr/bin/ld.lld
+    [ ! -x /usr/bin/ld.lld-21 ] && ln -sf "$candidate" /usr/bin/ld.lld-21
+    LLD_FOUND=1
     break
   fi
 done
+# Also check if lld package installed ld.lld somewhere else
+if [ "$LLD_FOUND" -eq 0 ]; then
+  for candidate in $(find /usr -name "ld.lld*" -type f 2>/dev/null | head -3); do
+    [ ! -x /usr/bin/ld.lld ] && ln -sf "$candidate" /usr/bin/ld.lld
+    [ ! -x /usr/bin/ld.lld-21 ] && ln -sf "$candidate" /usr/bin/ld.lld-21
+    LLD_FOUND=1
+    break
+  done
+fi
 command -v ld.lld &>/dev/null && echo "ld.lld: $(command -v ld.lld)" || echo "WARNING: ld.lld not found"
 command -v ld.lld-21 &>/dev/null && echo "ld.lld-21: $(command -v ld.lld-21)" || echo "WARNING: ld.lld-21 not found"
 # Redis core stays on gcc; RediSearch CMake/Rust finds clang-21 via PATH
