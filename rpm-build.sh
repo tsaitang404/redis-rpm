@@ -1,6 +1,7 @@
 #!/bin/bash
 set -ex
 VERSION="${REDIS_VERSION:?}"
+DISTTAG="${DISTTAG:-el9}"
 # Fresh copy of staging (rpmbuild wipes buildroot)
 rm -rf /tmp/staging-copy && cp -a /tmp/staging /tmp/staging-copy
 mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
