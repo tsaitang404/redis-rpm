@@ -132,5 +132,5 @@ SPEC
 
 sed -i "s/REPLACE_VERSION/${VERSION}/" "$SPEC_FILE"
 rpmbuild -bb --noclean "$SPEC_FILE" 2>&1 | tail -5
-cp ~/rpmbuild/RPMS/x86_64/*.rpm /out/ 2>/dev/null || cp $(find ~/rpmbuild/RPMS -name "*.rpm") /out/ 2>/dev/null || true
+mkdir -p /workspace/dist && cp ~/rpmbuild/RPMS/x86_64/*.rpm /workspace/dist/ 2>/dev/null || find ~/rpmbuild/RPMS -name "*.rpm" -exec cp {} /workspace/dist/ \; 2>/dev/null || true
 echo "=== Done ==="
