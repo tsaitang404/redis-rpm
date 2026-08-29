@@ -4,6 +4,13 @@ VERSION="${REDIS_VERSION:?REDIS_VERSION not set}"
 # Install rpmbuild if missing
 command -v rpmbuild || dnf install -y -q rpm-build lld 2>&1 | tail -1
 
+# Ensure LLVM 21 tools are in PATH (for clang-21, lld-21)
+if [ -d /opt/llvm-21.1.8/bin ]; then
+  export PATH="/opt/llvm-21.1.8/bin:$PATH"
+  # Also create symlinks for ld.lld-21 if missing
+  [ -f /opt/llvm-21.1.8/bin/ld.lld ] && [ ! -f /usr/bin/ld.lld-21 ] && ln -sf /opt/llvm-21.1.8/bin/ld.lld /usr/bin/ld.lld-21
+fi
+
 # Install Rust toolchain for RedisJSON/RediSearch
 if ! command -v rustc &>/dev/null; then
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable 2>&1 | tail -3
