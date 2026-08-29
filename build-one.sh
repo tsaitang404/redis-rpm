@@ -3,7 +3,6 @@ set -ex
 VERSION="${REDIS_VERSION:?REDIS_VERSION not set}"
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
-# --- fetch source ---
 cd /tmp
 if [ "$VERSION" = "unstable" ]; then
   git clone --depth 1 https://github.com/redis/redis.git redis-"$VERSION" 2>&1 | tail -3
@@ -15,36 +14,32 @@ else
 fi
 
 # --- Install prerequisites ---
-# Basic build tools + rpmbuild
-dnf install -y --allowerasing make gcc gcc-c++ rpm-build curl wget git tar gzip findutils openssl-devel systemd-devel || true
-
-# GCC toolset (el8/9)
-for ts in 15 14 13; do
-  [ -f "/etc/profile.d/gcc-toolset-${ts}.sh" ] && source "/etc/profile.d/gcc-toolset-${ts}.sh" && break
-done 2>/dev/null || true
-
-# LLVM/Clang + lld for RediSearch
-if [ -x /opt/llvm/bin/clang ]; then
-  export PATH="/opt/llvm/bin:$PATH"
-elif [ -x /opt/llvm-21.1.8/bin/clang ]; then
-  export PATH="/opt/llvm-21.1.8/bin:$PATH"
-fi
+command -v rpmbuild || dnf install -y rpm-build || true
 command -v lld-21 2>/dev/null || command -v lld 2>/dev/null || (dnf install -y lld || true)
 
-export BUILD_TLS=yes USE_SYSTEMD=yes
-# LTO only when LLVM available
-if command -v clang &>/dev/null; then export LTO=1; else export LTO=0; fi
+# LLVM for RediSearch
+if [ -x /opt/llvm-21.1.8/bin/clang ]; then
+  export PATH="/opt/llvm-21.1.8/bin:$PATH"
+elif [ -x /opt/llvm/bin/clang ]; then
+  export PATH="/opt/llvm/bin:$PATH"
+fi
 
-# --- Build (official flow: modules-update -> install-rust -> deploy) ---
+# Rust for RedisJSON
+if ! command -v rustc &>/dev/null; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable 2>&1 | tail -3
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
+# --- Build (official flow) ---
 if [ "$MAJOR" -ge 8 ] && [ -f modules/modules.yaml ]; then
+  export BUILD_TLS=yes USE_SYSTEMD=yes
+  if command -v clang &>/dev/null; then export LTO=1; else export LTO=0; fi
   make modules-update MODULES_UPDATE_SHALLOW=1 2>&1 | tail -5
-  make -C modules install-rust INSTALL_RUST_TOOLCHAIN=yes 2>&1 | tail -5
-  make -j"$(nproc)" deploy PREFIX=/usr/local 2>&1 || make -j"$(nproc)" deploy PREFIX=/usr/local || true
-  echo "=== Modules installed ==="
-  ls -la /usr/local/lib/redis/modules/ 2>/dev/null || true
+  make -C modules install-rust INSTALL_RUST_TOOLCHAIN=yes 2>&1 | tail -5 || true
+  make build -j"$(nproc)" 2>&1 || make -C src all -j"$(nproc)"
+  make -j"$(nproc)" deploy PREFIX=/usr/local 2>&1 || make deploy PREFIX=/usr/local || true
 else
-  make -j"$(nproc)" all 2>&1 | tail -3
-  make install PREFIX=/usr/local 2>&1 | tail -3
+  make -j"$(nproc)"
 fi
 
 # --- rpmbuild ---
@@ -73,49 +68,35 @@ Redis %{version} with bundled modules.
 %prep
 %setup -q
 %build
-MAJOR=$(echo "%{version}" | cut -d. -f1)
-if [ "$MAJOR" -ge 8 ] && [ -f modules/modules.yaml ]; then
-  for ts in 15 14 13; do
-    [ -f "/etc/profile.d/gcc-toolset-${ts}.sh" ] && source "/etc/profile.d/gcc-toolset-${ts}.sh" && break
-  done 2>/dev/null || true
-  [ -x /opt/llvm/bin/clang ] && export PATH="/opt/llvm/bin:$PATH"
-  [ -x /opt/llvm-21.1.8/bin/clang ] && export PATH="/opt/llvm-21.1.8/bin:$PATH"
-  command -v lld-21 2>/dev/null || command -v lld 2>/dev/null || (dnf install -y lld || true)
-  # Install LLVM if missing (for RediSearch)
-  if ! command -v clang-21 &>/dev/null && ! command -v clang &>/dev/null; then
-    dnf install -y -q clang lld 2>&1 | tail -1 || true
-  fi
-  if [ -x /opt/llvm-21.1.8/bin/clang ]; then export PATH="/opt/llvm-21.1.8/bin:$PATH"; fi
-  export BUILD_TLS=yes USE_SYSTEMD=yes
-  if command -v clang &>/dev/null; then export LTO=1; else export LTO=0; fi
-  make modules-update MODULES_UPDATE_SHALLOW=1 2>&1 | tail -5
-  make -C modules install-rust INSTALL_RUST_TOOLCHAIN=yes 2>&1 | tail -5
-  make -j\$(nproc) deploy PREFIX=/usr/local 2>&1 || true
-else
-  make -j\$(nproc)
-fi
+echo "Build already completed outside rpmbuild, skipping."
 %install
 rm -rf %{buildroot}
 mkdir -p %{buildroot}/{usr/bin,etc/redis/sentinel,var/lib/redis,var/log/redis,run/redis,run/sentinel,usr/lib/redis/modules,usr/lib/systemd/system,usr/share/selinux/packages}
-install -m 755 src/redis-server %{buildroot}/usr/bin/
-install -m 755 src/redis-cli %{buildroot}/usr/bin/
-install -m 755 src/redis-benchmark %{buildroot}/usr/bin/
-install -m 755 src/redis-check-rdb %{buildroot}/usr/bin/
-install -m 755 src/redis-check-aof %{buildroot}/usr/bin/
+# Binaries from make deploy
+for bin in redis-server redis-cli redis-benchmark redis-check-rdb redis-check-aof; do
+  install -m 755 /usr/local/bin/$bin %{buildroot}/usr/bin/ 2>/dev/null || true
+done
 ln -sf redis-server %{buildroot}/usr/bin/redis-sentinel
-ln -sf redis-server %{buildroot}/usr/bin/redis-check-aof
-cp redis.conf %{buildroot}/etc/redis/
-cp sentinel.conf %{buildroot}/etc/redis/sentinel/
-install -m 644 -D src/systemd-redis_server.service %{buildroot}/usr/lib/systemd/system/redis.service
-install -m 644 -D src/systemd-redis_sentinel.service %{buildroot}/usr/lib/systemd/system/redis-sentinel.service
-# Install modules from make deploy output
+# Config
+cp /usr/local/etc/redis/redis.conf %{buildroot}/etc/redis/ 2>/dev/null || cp redis.conf %{buildroot}/etc/redis/ 2>/dev/null || true
+cp /usr/local/etc/redis/sentinel.conf %{buildroot}/etc/redis/sentinel/ 2>/dev/null || cp sentinel.conf %{buildroot}/etc/redis/sentinel/ 2>/dev/null || true
+# Systemd
+[ -f src/systemd-redis_server.service ] && install -m 644 -D src/systemd-redis_server.service %{buildroot}/usr/lib/systemd/system/redis.service
+[ -f src/systemd-redis_sentinel.service ] && install -m 644 -D src/systemd-redis_sentinel.service %{buildroot}/usr/lib/systemd/system/redis-sentinel.service
+# Modules from make deploy — only copy actual module .so files, not Rust proc-macro libs
 if [ -d /usr/local/lib/redis/modules ]; then
-  cp -a /usr/local/lib/redis/modules/*.so %{buildroot}/usr/lib/redis/modules/ 2>/dev/null || true
+  for so in /usr/local/lib/redis/modules/*.so; do
+    [ -f "$so" ] || continue
+    name=$(basename "$so")
+    # Skip lib* (Rust proc-macro/derive crates) and libevent* (system libs)
+    case "$name" in lib*|libevent*) continue ;; esac
+    cp "$so" %{buildroot}/usr/lib/redis/modules/
+  done
 fi
-# Also check build tree for modules
-find . -path "*/bin/*release*" -name "*.so" ! -path "./src/*" ! -name "lib*" -exec cp {} %{buildroot}/usr/lib/redis/modules/ \; 2>/dev/null || true
-# Install SELinux
+# SELinux
 [ -d selinux ] && cp selinux/* %{buildroot}/usr/share/selinux/packages/ 2>/dev/null || true
+echo "=== Modules in buildroot ==="
+ls -la %{buildroot}/usr/lib/redis/modules/ 2>/dev/null || true
 %files
 %dir %attr(0750,redis,redis) /var/lib/redis
 %dir %attr(0750,redis,redis) /var/log/redis
@@ -150,6 +131,6 @@ fi
 SPEC
 
 sed -i "s/REPLACE_VERSION/${VERSION}/" "$SPEC_FILE"
-rpmbuild -bb --noclean "$SPEC_FILE"
+rpmbuild -bb --noclean "$SPEC_FILE" 2>&1 | tail -5
 cp ~/rpmbuild/RPMS/x86_64/*.rpm /out/ 2>/dev/null || cp ~/rpmbuild/RPMS/*/*.rpm /out/ 2>/dev/null
 echo "=== Done ==="
