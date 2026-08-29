@@ -81,6 +81,11 @@ if [ "$MAJOR" -ge 8 ] && [ -f modules/modules.yaml ]; then
   [ -x /opt/llvm/bin/clang ] && export PATH="/opt/llvm/bin:$PATH"
   [ -x /opt/llvm-21.1.8/bin/clang ] && export PATH="/opt/llvm-21.1.8/bin:$PATH"
   command -v lld-21 2>/dev/null || command -v lld 2>/dev/null || dnf install -y -q lld 2>&1 | tail -1
+  # Install LLVM if missing (for RediSearch)
+  if ! command -v clang-21 &>/dev/null && ! command -v clang &>/dev/null; then
+    dnf install -y -q clang lld 2>&1 | tail -1 || true
+  fi
+  if [ -x /opt/llvm-21.1.8/bin/clang ]; then export PATH="/opt/llvm-21.1.8/bin:$PATH"; fi
   export BUILD_TLS=yes USE_SYSTEMD=yes
   if command -v clang &>/dev/null; then export LTO=1; else export LTO=0; fi
   make modules-update MODULES_UPDATE_SHALLOW=1 2>&1 | tail -5
