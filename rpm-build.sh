@@ -9,7 +9,7 @@ cat > /tmp/rpmbuild/redis.spec << EOF
 %define _topdir /tmp/rpmbuild
 Name: redis
 Version: ${VERSION}
-Release: 1
+Release: 1.${DISTTAG}
 Summary: Redis with bundled modules
 License: SSPLv1
 BuildArch: x86_64
