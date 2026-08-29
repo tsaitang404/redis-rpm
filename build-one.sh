@@ -17,9 +17,28 @@ fi
 dnf install -y --allowerasing make gcc gcc-c++ rpm-build curl wget git tar gzip findutils openssl-devel systemd-devel cmake 2>&1 | tail -3 || true
 command -v rpmbuild || dnf install -y rpm-build || true
 
-# LLVM for RediSearch
+# LLVM 21 for RediSearch (required exactly clang-21/lld-21)
+if ! command -v clang-21 &>/dev/null; then
+  if [ -f /etc/fedora-release ]; then :; fi
+  # Try distro LLVM 21 first, else official llvm.org repo
+  dnf install -y llvm-toolset-21 2>/dev/null || true
+  if ! command -v clang-21 &>/dev/null; then
+    dnf install -y 'dnf-command(config-manager)' 2>/dev/null || true
+    dnf config-manager --set-enabled crb 2>/dev/null || true
+    dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest.rpm 2>/dev/null ||       dnf install -y epel-release 2>/dev/null || true
+    dnf install -y clang21 lld21 2>/dev/null || true
+  fi
+  if ! command -v clang-21 &>/dev/null; then
+    # Official LLVM repo (works on el8/9/10)
+    MAJOR_NUM=$(rpm -E %{rhel})
+    dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${MAJOR_NUM}.noarch.rpm" 2>/dev/null || true
+    dnf config-manager --add-repo "https://apt.llvm.org/llvm-rhel${MAJOR_NUM}.repo" 2>/dev/null || true
+    dnf config-manager --set-enabled llvm-21 2>/dev/null || true
+    dnf install -y clang-tools-extra-21 clang-21 lld-21 2>/dev/null ||       dnf --enablerepo=llvm-21 install -y clang-21 lld-21 2>/dev/null || true
+  fi
+fi
+command -v clang-21 &>/dev/null && export CC=clang-21 CXX=clang++-21
 if [ -x /opt/llvm-21.1.8/bin/clang ]; then export PATH="/opt/llvm-21.1.8/bin:$PATH"; fi
-command -v lld-21 2>/dev/null || command -v lld 2>/dev/null || (dnf install -y lld || true)
 
 # Rust for RedisJSON
 if ! command -v rustc &>/dev/null; then
