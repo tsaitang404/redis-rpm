@@ -1,189 +1,150 @@
 #!/bin/bash
 set -ex
 VERSION="${REDIS_VERSION:?REDIS_VERSION not set}"
-# Install rpmbuild if missing
-command -v rpmbuild || dnf install -y -q rpm-build lld 2>&1 | tail -1
-
-# Ensure LLVM 21 tools are in PATH (for clang-21, lld-21)
-if [ -d /opt/llvm-21.1.8/bin ]; then
-  export PATH="/opt/llvm-21.1.8/bin:$PATH"
-  # Also create symlinks for ld.lld-21 if missing
-  [ -f /opt/llvm-21.1.8/bin/ld.lld ] && [ ! -f /usr/bin/ld.lld-21 ] && ln -sf /opt/llvm-21.1.8/bin/ld.lld /usr/bin/ld.lld-21
-fi
-
-# Install Rust toolchain for RedisJSON/RediSearch
-if ! command -v rustc &>/dev/null; then
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable 2>&1 | tail -3
-  export PATH="$HOME/.cargo/bin:$PATH"
-  rustc --version
-fi
-
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
 # --- fetch source ---
 cd /tmp
-if [ "$MAJOR" -ge 8 ]; then
-  git clone --depth 1 --branch "$VERSION" https://github.com/redis/redis.git "redis-${VERSION}" 2>&1 | tail -3
-  cd "redis-${VERSION}"
-  # Fetch module sources per modules.yaml manifest
-  make modules-update 2>&1 | tail -5 || echo "WARNING: modules-update failed"
-  # Verify modules cloned
-  ls -d modules/*/src 2>/dev/null || echo "WARNING: no module sources"
-  # Create .prepared markers for rpmbuild
-  for mod in modules/*/src; do
-    [ -d "$mod" ] && touch "$mod/.prepared"
-  done
+if [ "$VERSION" = "unstable" ]; then
+  git clone --depth 1 https://github.com/redis/redis.git redis-"$VERSION" 2>&1 | tail -3
+  cd redis-"$VERSION"
+  yq -i '.modules[].ref = "master"' modules/modules.yaml
 else
-  wget -q "https://download.redis.io/releases/redis-${VERSION}.tar.gz"
-  tar xzf "redis-${VERSION}.tar.gz"
-  cd "redis-${VERSION}"
+  curl -sL "https://github.com/redis/redis/archive/refs/tags/${VERSION}.tar.gz" -o redis.tar.gz
+  rm -rf redis-"$VERSION" && tar xzf redis.tar.gz && cd redis-"$VERSION"
 fi
 
-mkdir -p /workspace/dist ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+# --- Install prerequisites ---
+# rpmbuild
+command -v rpmbuild || dnf install -y -q rpm-build 2>&1 | tail -1
+
+# GCC toolset (el8/9)
+for ts in 15 14 13; do
+  [ -f "/etc/profile.d/gcc-toolset-${ts}.sh" ] && source "/etc/profile.d/gcc-toolset-${ts}.sh" && break
+done 2>/dev/null || true
+
+# LLVM/Clang + lld for RediSearch
+if [ -x /opt/llvm/bin/clang ]; then
+  export PATH="/opt/llvm/bin:$PATH"
+elif [ -x /opt/llvm-21.1.8/bin/clang ]; then
+  export PATH="/opt/llvm-21.1.8/bin:$PATH"
+fi
+command -v lld-21 2>/dev/null || command -v lld 2>/dev/null || dnf install -y -q lld 2>&1 | tail -1
+
+export BUILD_TLS=yes USE_SYSTEMD=yes
+# LTO only when LLVM available
+if command -v clang &>/dev/null; then export LTO=1; else export LTO=0; fi
+
+# --- Build (official flow: modules-update -> install-rust -> deploy) ---
+if [ "$MAJOR" -ge 8 ] && [ -f modules/modules.yaml ]; then
+  make modules-update MODULES_UPDATE_SHALLOW=1 2>&1 | tail -5
+  make -C modules install-rust INSTALL_RUST_TOOLCHAIN=yes 2>&1 | tail -5
+  make -j"$(nproc)" deploy PREFIX=/usr/local 2>&1 || make -j"$(nproc)" deploy PREFIX=/usr/local || true
+  echo "=== Modules installed ==="
+  ls -la /usr/local/lib/redis/modules/ 2>/dev/null || true
+else
+  make -j"$(nproc)" all 2>&1 | tail -3
+  make install PREFIX=/usr/local 2>&1 | tail -3
+fi
+
+# --- rpmbuild ---
+SPEC_FILE="/tmp/redis.spec"
+mkdir -p ~/rpmbuild/{SOURCES,SPECS,BUILD,BUILDROOT,RPMS,SRPMS}
 tar czf ~/rpmbuild/SOURCES/redis-${VERSION}.tar.gz -C /tmp "redis-${VERSION}"
 
-cat > ~/rpmbuild/SPECS/redis.spec <<'SPECEOF'
+cat > "$SPEC_FILE" << SPEC
+Name:             redis
+Version:          REPLACE_VERSION
+Release:          1
+Summary:          Redis (persistent key-value database with modules)
+License:          SSPLv1 and RSALv2 and BSD
+URL:              https://redis.io
+Source0:          redis-%{version}.tar.gz
+Requires(pre):    shadow-utils
+Requires(post):   systemd
+Requires(preun):  systemd
+Requires(postun): systemd
+BuildRequires:    systemd systemd-devel
 %define debug_package %{nil}
-Name:           redis
-Version:        REPLACE_VERSION
-Release:        1%{?dist}
-Summary:        Redis in-memory key-value database
-License:        BSD-3-Clause
-URL:            https://redis.io
-Source0:        redis-REPLACE_VERSION.tar.gz
-BuildRequires:  gcc, make
-
+%global _enable_debug_package 0
+%global __os_install_post %{nil}
 %description
-Redis core + available bundled modules.
-
+Redis %{version} with bundled modules.
 %prep
 %setup -q
-
 %build
-MAJOR=$(echo "REPLACE_VERSION" | cut -d. -f1)
-if [ "$MAJOR" -ge 8 ]; then
-  # 'make build' handles core + modules; module failures are non-fatal
-  make build -j$(nproc) || make -C src all -j$(nproc)
+MAJOR=$(echo "%{version}" | cut -d. -f1)
+if [ "$MAJOR" -ge 8 ] && [ -f modules/modules.yaml ]; then
+  for ts in 15 14 13; do
+    [ -f "/etc/profile.d/gcc-toolset-${ts}.sh" ] && source "/etc/profile.d/gcc-toolset-${ts}.sh" && break
+  done 2>/dev/null || true
+  [ -x /opt/llvm/bin/clang ] && export PATH="/opt/llvm/bin:$PATH"
+  [ -x /opt/llvm-21.1.8/bin/clang ] && export PATH="/opt/llvm-21.1.8/bin:$PATH"
+  command -v lld-21 2>/dev/null || command -v lld 2>/dev/null || dnf install -y -q lld 2>&1 | tail -1
+  export BUILD_TLS=yes USE_SYSTEMD=yes
+  if command -v clang &>/dev/null; then export LTO=1; else export LTO=0; fi
+  make modules-update MODULES_UPDATE_SHALLOW=1 2>&1 | tail -5
+  make -C modules install-rust INSTALL_RUST_TOOLCHAIN=yes 2>&1 | tail -5
+  make -j\$(nproc) deploy PREFIX=/usr/local 2>&1 || true
 else
-  make -j$(nproc)
+  make -j\$(nproc)
 fi
-
 %install
 rm -rf %{buildroot}
-mkdir -p %{buildroot}{/usr/bin,/etc/redis/sentinel,/var/lib/redis,/var/log/redis,/run/redis,/run/sentinel,/usr/lib/redis/modules,/usr/lib/systemd/system,/usr/share/selinux/packages}
+mkdir -p %{buildroot}/{usr/bin,etc/redis/sentinel,var/lib/redis,var/log/redis,run/redis,run/sentinel,usr/lib/redis/modules,usr/lib/systemd/system,usr/share/selinux/packages}
 install -m 755 src/redis-server %{buildroot}/usr/bin/
 install -m 755 src/redis-cli %{buildroot}/usr/bin/
 install -m 755 src/redis-benchmark %{buildroot}/usr/bin/
-install -m 755 src/redis-check-aof %{buildroot}/usr/bin/
 install -m 755 src/redis-check-rdb %{buildroot}/usr/bin/
-ln -s redis-server %{buildroot}/usr/bin/redis-sentinel
-# Install available module .so files from all possible locations
-find . -name "*.so" -path "*/bin/*release*" ! -path "./src/*" -exec install -m 755 {} %{buildroot}/usr/lib/redis/modules/ \; 2>/dev/null || true
-install -m 640 redis.conf %{buildroot}/etc/redis/redis.conf
-install -m 640 sentinel.conf %{buildroot}/etc/redis/sentinel/sentinel.conf
-cat > %{buildroot}/usr/lib/systemd/system/redis.service <<'SVC'
-[Unit]
-Description=Advanced key-value store
-After=network.target
-Documentation=http://redis.io/documentation
-[Service]
-Type=notify
-ExecStart=/usr/bin/redis-server /etc/redis/redis.conf
-TimeoutStopSec=0
-Restart=always
-User=redis
-Group=redis
-RuntimeDirectory=redis
-RuntimeDirectoryMode=2755
-UMask=007
-PrivateTmp=yes
-LimitNOFILE=65535
-PrivateDevices=yes
-ProtectHome=yes
-ReadOnlyDirectories=/
-ReadWriteDirectories=-/var/lib/redis
-ReadWriteDirectories=-/var/log/redis
-ReadWriteDirectories=-/run/redis
-NoNewPrivileges=true
-CapabilityBoundingSet=CAP_SYS_RESOURCE
-ProtectSystem=true
-ReadWriteDirectories=-/etc/redis
-[Install]
-WantedBy=multi-user.target
-SVC
-cat > %{buildroot}/usr/lib/systemd/system/redis-sentinel.service <<'SVC'
-[Unit]
-Description=Advanced key-value store
-After=network.target
-Documentation=http://redis.io/documentation
-[Service]
-Type=notify
-ExecStart=/usr/bin/redis-sentinel /etc/redis/sentinel/sentinel.conf
-TimeoutStopSec=0
-Restart=always
-User=redis
-Group=redis
-RuntimeDirectory=sentinel
-RuntimeDirectoryMode=2755
-UMask=007
-PrivateTmp=yes
-LimitNOFILE=65535
-PrivateDevices=yes
-ProtectHome=yes
-ReadOnlyDirectories=/
-ReadWriteDirectories=-/var/lib/redis
-ReadWriteDirectories=-/var/log/redis
-ReadWriteDirectories=-/run/sentinel
-NoNewPrivileges=true
-CapabilityBoundingSet=CAP_SYS_RESOURCE
-ProtectSystem=true
-ReadWriteDirectories=-/etc/redis
-[Install]
-WantedBy=multi-user.target
-SVC
-cat > %{buildroot}/usr/share/selinux/packages/redis-ce.te <<'SE'
-module redis-ce 1.0;
-require { type redis_t; type redis_conf_t; class file { read write open }; }
-allow redis_t redis_conf_t:file { read write open };
-SE
-cat > %{buildroot}/usr/share/selinux/packages/redis-ce.fc <<'SE'
-/etc/redis(/.*)?    gen_context(system_u:object_r:redis_conf_t,s0)
-/run/redis(/.*)?    gen_context(system_u:object_r:redis_var_run_t,s0)
-SE
-
-%pre
-getent group redis >/dev/null || groupadd -r redis
-getent passwd redis >/dev/null || useradd -r -g redis -d /var/lib/redis -s /sbin/nologin redis
-
-%post
-command -v checkmodule &>/dev/null && {
-  checkmodule -M -m /usr/share/selinux/packages/redis-ce.te -o /usr/share/selinux/packages/redis-ce.mod 2>/dev/null || true
-  semodule_package -m /usr/share/selinux/packages/redis-ce.mod -o /usr/share/selinux/packages/redis-ce.pp -f /usr/share/selinux/packages/redis-ce.fc 2>/dev/null || true
-  semodule -i /usr/share/selinux/packages/redis-ce.pp 2>/dev/null || true
-}
-command -v chcon &>/dev/null && chcon -t redis_conf_t /etc/redis/sentinel /etc/redis/sentinel/sentinel.conf 2>/dev/null || true
-
+install -m 755 src/redis-check-aof %{buildroot}/usr/bin/
+ln -sf redis-server %{buildroot}/usr/bin/redis-sentinel
+ln -sf redis-server %{buildroot}/usr/bin/redis-check-aof
+cp redis.conf %{buildroot}/etc/redis/
+cp sentinel.conf %{buildroot}/etc/redis/sentinel/
+install -m 644 -D src/systemd-redis_server.service %{buildroot}/usr/lib/systemd/system/redis.service
+install -m 644 -D src/systemd-redis_sentinel.service %{buildroot}/usr/lib/systemd/system/redis-sentinel.service
+# Install modules from make deploy output
+if [ -d /usr/local/lib/redis/modules ]; then
+  cp -a /usr/local/lib/redis/modules/*.so %{buildroot}/usr/lib/redis/modules/ 2>/dev/null || true
+fi
+# Also check build tree for modules
+find . -path "*/bin/*release*" -name "*.so" ! -path "./src/*" ! -name "lib*" -exec cp {} %{buildroot}/usr/lib/redis/modules/ \; 2>/dev/null || true
+# Install SELinux
+[ -d selinux ] && cp selinux/* %{buildroot}/usr/share/selinux/packages/ 2>/dev/null || true
 %files
+%dir %attr(0750,redis,redis) /var/lib/redis
+%dir %attr(0750,redis,redis) /var/log/redis
+%dir %attr(0755,redis,redis) /run/redis
+%dir %attr(0755,redis,redis) /run/sentinel
 /usr/bin/redis-server
 /usr/bin/redis-cli
-/usr/bin/redis-sentinel
 /usr/bin/redis-benchmark
-/usr/bin/redis-check-aof
 /usr/bin/redis-check-rdb
-%config(noreplace) /etc/redis/redis.conf
-%config(noreplace) /etc/redis/sentinel/sentinel.conf
-%attr(750,redis,redis) /var/lib/redis
-%attr(750,redis,redis) /var/log/redis
+/usr/bin/redis-check-aof
+/usr/bin/redis-sentinel
 /usr/lib/redis/modules/
 /usr/lib/systemd/system/redis.service
 /usr/lib/systemd/system/redis-sentinel.service
-/usr/share/selinux/packages/redis-ce.te
-/usr/share/selinux/packages/redis-ce.fc
-SPECEOF
+%config(noreplace) /etc/redis/redis.conf
+%config(noreplace) /etc/redis/sentinel/
+/usr/share/selinux/packages/
+%pre
+getent group redis &>/dev/null || groupadd -r redis
+getent passwd redis &>/dev/null || useradd -r -g redis -d /var/lib/redis -s /sbin/nologin redis
+%post
+systemctl daemon-reload
+%preun
+if [ \$1 -eq 0 ]; then
+  systemctl stop redis.service redis-sentinel.service 2>/dev/null || true
+  systemctl disable redis.service redis-sentinel.service 2>/dev/null || true
+fi
+%postun
+if [ \$1 -ge 1 ]; then
+  systemctl try-restart redis.service redis-sentinel.service 2>/dev/null || true
+fi
+SPEC
 
-sed -i "s/REPLACE_VERSION/${VERSION}/g" ~/rpmbuild/SPECS/redis.spec
-
-rpmbuild -bb ~/rpmbuild/SPECS/redis.spec --define '__os_install_post %{nil}'
-find ~/rpmbuild/RPMS -name "*.rpm" ! -name "*debug*" -exec cp {} /workspace/dist/ \;
-echo "== built =="
-ls -lh /workspace/dist/
+sed -i "s/REPLACE_VERSION/${VERSION}/" "$SPEC_FILE"
+rpmbuild -bb --noclean "$SPEC_FILE"
+cp ~/rpmbuild/RPMS/x86_64/*.rpm /out/ 2>/dev/null || cp ~/rpmbuild/RPMS/*/*.rpm /out/ 2>/dev/null
+echo "=== Done ==="
