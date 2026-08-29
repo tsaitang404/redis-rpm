@@ -1,6 +1,9 @@
 #!/bin/bash
 set -ex
 VERSION="${REDIS_VERSION:?REDIS_VERSION not set}"
+# Install rpmbuild if missing
+command -v rpmbuild || dnf install -y -q rpm-build 2>&1 | tail -1
+
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
 # --- fetch source ---
