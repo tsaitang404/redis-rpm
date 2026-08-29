@@ -1,18 +1,10 @@
 name: Auto Build and Release on Upstream Tag
-
 on:
-  schedule:
-    - cron: '17 */6 * * *'
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Redis version tag to build (e.g. 8.10.1).'
-        required: false
-        type: string
-
-permissions:
-  contents: write
-  packages: write
+        description: "Redis version tag (e.g. 8.10.1) or 'unstable'"
+        required: true
 
 env:
   REGISTRY: ghcr.io
@@ -22,114 +14,76 @@ jobs:
   check-upstream:
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.detect.outputs.tag }}
-      should_build: ${{ steps.detect.outputs.should_build }}
+      tag: ${{ steps.check.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - id: detect
+      - id: check
         run: |
-          if [ -n "${{ inputs.release_tag }}" ]; then
-            echo "tag=${{ inputs.release_tag }}" >> $GITHUB_OUTPUT
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          else
-            LATEST=$(git ls-remote --tags https://github.com/redis/redis.git \
-              | grep -oP 'refs/tags/\K[0-9]+\.[0-9]+\.[0-9]+$' \
-              | sort -V | tail -1)
-            echo "Latest upstream tag: $LATEST"
-            if gh release view "$LATEST" --repo ${{ github.repository }} &>/dev/null; then
-              echo "Release $LATEST already exists, skipping."
-              echo "should_build=false" >> $GITHUB_OUTPUT
-            else
-              echo "tag=$LATEST" >> $GITHUB_OUTPUT
-              echo "should_build=true" >> $GITHUB_OUTPUT
-            fi
-          fi
-      - name: Sync fork with upstream
-        if: steps.detect.outputs.should_build == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote add upstream https://github.com/redis/redis-rpm.git 2>/dev/null || true
-          git fetch upstream
-          git merge upstream/unstable --no-edit || true
-          git push origin unstable || true
+          TAG="${{ github.event.inputs.release_tag }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Building Redis $TAG"
 
   build-rpm:
     needs: check-upstream
-    if: needs.check-upstream.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - distro: rockylinux8
-          - distro: rockylinux9
-          - distro: rockylinux10
+          - distro: rockylinux
+            version: 8
+          - distro: rockylinux
+            version: 9
+          - distro: rockylinux
+            version: 10
     steps:
       - uses: actions/checkout@v4
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull builder image
-        run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}-${{ github.sha }}-amd64 || \
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}-unstable || \
-          echo "NEED_BUILD=true" >> $GITHUB_ENV
-
-      - name: Build builder image (fallback)
-        if: env.NEED_BUILD == 'true'
-        run: |
-          docker build \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}-unstable \
-            -f dockerfiles/Dockerfile.${{ matrix.distro }} \
-            .
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}-unstable
 
       - name: Build RPM
         env:
           REDIS_VERSION: ${{ needs.check-upstream.outputs.tag }}
         run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}-${{ github.sha }}-amd64"
-          docker image inspect "$IMAGE" &>/dev/null || \
-            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.distro }}-unstable"
-          
+          mkdir -p dist
           docker run --rm \
             -v "$PWD:/workspace" \
             -w /workspace \
             -e REDIS_VERSION="$REDIS_VERSION" \
-            "$IMAGE" \
+            ${{ matrix.distro }}:${{ matrix.version }} \
             bash /workspace/build-one.sh
+          cp /tmp/*.rpm dist/ 2>/dev/null || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rpms-${{ matrix.distro }}
+          name: redis-rpm-${{ matrix.distro }}${{ matrix.version }}
           path: dist/*.rpm
-          retention-days: 1
 
   publish:
     needs: [check-upstream, build-rpm]
     runs-on: ubuntu-latest
+    if: needs.check-upstream.outputs.tag != ''
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          path: all-rpms
+          path: artifacts/
           merge-multiple: true
 
-      - name: Create GitHub Release
+      - name: Create/Update Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.check-upstream.outputs.tag }}
         run: |
-          gh release create "$TAG" \
-            --repo "${{ github.repository }}" \
-            --title "Redis $TAG RPM" \
-            --generate-notes \
-            all-rpms/*.rpm
+          mkdir -p release
+          find artifacts/ -name "*.rpm" -exec cp {} release/ \;
+          ls -lh release/
+          if gh release view "$TAG" --repo ${{ github.repository }} &>/dev/null; then
+            gh release upload "$TAG" release/*.rpm --repo ${{ github.repository }} --clobber
+          else
+            gh release create "$TAG" release/*.rpm \
+              --repo ${{ github.repository }} \
+              --title "Redis $TAG RPM" \
+              --generate-notes
+          fi
