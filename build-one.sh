@@ -2,7 +2,7 @@
 set -ex
 VERSION="${REDIS_VERSION:?REDIS_VERSION not set}"
 # Install rpmbuild if missing
-command -v rpmbuild || dnf install -y -q rpm-build 2>&1 | tail -1
+command -v rpmbuild || dnf install -y -q rpm-build lld 2>&1 | tail -1
 
 # Install Rust toolchain for RedisJSON/RediSearch
 if ! command -v rustc &>/dev/null; then
