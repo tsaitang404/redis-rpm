@@ -3,17 +3,22 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Redis version tag"
+        description: "Redis version tag (e.g. 8.10.1, 7.4.11, 6.2.24)"
         required: true
 jobs:
   check-upstream:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.check.outputs.tag }}
+      major: ${{ steps.check.outputs.major }}
     steps:
       - uses: actions/checkout@v4
       - id: check
-        run: echo "tag=${{ github.event.inputs.release_tag }}" >> $GITHUB_OUTPUT
+        run: |
+          TAG="${{ github.event.inputs.release_tag }}"
+          MAJOR=$(echo "$TAG" | cut -d. -f1)
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "major=$MAJOR" >> $GITHUB_OUTPUT
   build-rpm:
     needs: check-upstream
     runs-on: ubuntu-latest
