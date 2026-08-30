@@ -2,6 +2,14 @@
 set -ex
 VERSION="${REDIS_VERSION:?REDIS_VERSION not set}"
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
+ARCH=$(uname -m)
+# Normalize arch name for RPM
+case "$ARCH" in
+  x86_64) ARCH=x86_64 ;;
+  aarch64|arm64) ARCH=aarch64 ;;
+  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+esac
+export ARCH
 
 cd /tmp
 if [ "$VERSION" = "unstable" ]; then

@@ -12,7 +12,7 @@ Version: ${VERSION}
 Release: 1.${DISTTAG}
 Summary: Redis with bundled modules
 License: SSPLv1
-BuildArch: x86_64
+BuildArch: ${ARCH:-x86_64}
 %define debug_package %{nil}
 %define _build_id_links none
 %description
@@ -39,4 +39,4 @@ cp -a /tmp/staging-copy/* %{buildroot}/
 /usr/share/selinux/packages
 EOF
 rpmbuild -bb --noclean --buildroot /tmp/rpmbuild/BUILDROOT/redis /tmp/rpmbuild/redis.spec
-cp /tmp/rpmbuild/RPMS/x86_64/*.rpm /workspace/dist/
+cp /tmp/rpmbuild/RPMS/${ARCH:-x86_64}/*.rpm /workspace/dist/
