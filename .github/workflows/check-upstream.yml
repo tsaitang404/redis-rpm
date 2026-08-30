@@ -20,12 +20,18 @@ jobs:
       - name: Check for new upstream tags
         id: check
         run: |
-          # Get latest upstream tag (redis/redis)
-          UPSTREAM_TAG=$(curl -s https://api.github.com/repos/redis/redis/tags | jq -r '.[0].name')
+          # Get latest stable upstream tag (redis/redis) - filter for version tags only
+          UPSTREAM_TAG=$(curl -s https://api.github.com/repos/redis/redis/tags | jq -r '.[].name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
           echo "upstream: $UPSTREAM_TAG"
+          
+          # If no version tag found, try releases API
+          if [ -z "$UPSTREAM_TAG" ] || [ "$UPSTREAM_TAG" = "null" ]; then
+            UPSTREAM_TAG=$(curl -s https://api.github.com/repos/redis/redis/releases/latest | jq -r '.tag_name')
+            echo "upstream (from releases): $UPSTREAM_TAG"
+          fi
 
-          # Get our latest release
-          OUR_TAG=$(gh release list --repo ${{ github.repository }} --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || echo "none")
+          # Get our latest release (excluding -core releases)
+          OUR_TAG=$(gh release list --repo ${{ github.repository }} --limit 10 --json tagName --jq '.[].tagName' | grep -v '\-core$' | head -1)
           echo "ours: $OUR_TAG"
 
           if [ "$UPSTREAM_TAG" != "$OUR_TAG" ] && [ "$UPSTREAM_TAG" != "null" ] && [ "$UPSTREAM_TAG" != "" ]; then
