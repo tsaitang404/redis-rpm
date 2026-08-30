@@ -128,15 +128,21 @@ else
 fi
 if command -v clang &>/dev/null; then export LTO=1; else export LTO=0; fi
 
-# Cross-compilation for arm64 (skip modules, they need native build)
+# Cross-compilation for arm64
 if [ "$ARCH" = "aarch64" ]; then
-  echo "Cross-compiling for aarch64, skipping modules"
+  echo "=== Cross-compiling for aarch64 ==="
   BUILD_MODULES=false
+  # Install cross-compiler (EPEL provides gcc-aarch64-linux-gnu on el8/9)
   dnf install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu 2>/dev/null || true
-  # For el8/9, install cross-compiler from EPEL or build manual
-  if ! command -v aarch64-linux-gnu-gcc &>/dev/null; then
-    echo "Cross-compiler not available, using QEMU fallback"
-    BUILD_MODULES="${BUILD_MODULES:-auto}"
+  if command -v aarch64-linux-gnu-gcc &>/dev/null; then
+    export CC=aarch64-linux-gnu-gcc
+    export CXX=aarch64-linux-gnu-g++
+    export CROSS_COMPILE=aarch64-linux-gnu-
+    export PKG_CONFIG_PATH=/usr/aarch64-linux-gnu/sysroot/lib/pkgconfig
+    echo "Using cross-compiler: $CC"
+  else
+    echo "ERROR: cross-compiler not available"
+    exit 1
   fi
 fi
 
