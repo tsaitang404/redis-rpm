@@ -128,6 +128,26 @@ else
 fi
 if command -v clang &>/dev/null; then export LTO=1; else export LTO=0; fi
 
+# Install ARM cross-compiler toolchain for aarch64 builds
+if [ "$ARCH" = "aarch64" ]; then
+  echo "=== Setting up aarch64 cross-compilation ==="
+  BUILD_MODULES=false  # modules need native build
+  TOOLCHAIN_DIR="/opt/arm-toolchain"
+  if [ ! -d "$TOOLCHAIN_DIR" ]; then
+    echo "Downloading ARM GNU Toolchain..."
+    TOOLCHAIN_URL="https://developer.arm.com/-/media/Files/downloads/gnu/13.3.rel1/binrel/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
+    curl -sL "$TOOLCHAIN_URL" | tar xJ -C /opt/
+    mv /opt/arm-gnu-toolchain-* "$TOOLCHAIN_DIR" 2>/dev/null || true
+  fi
+  export CC="$TOOLCHAIN_DIR/bin/aarch64-none-linux-gnu-gcc"
+  export CXX="$TOOLCHAIN_DIR/bin/aarch64-none-linux-gnu-g++"
+  export AR="$TOOLCHAIN_DIR/bin/aarch64-none-linux-gnu-ar"
+  export RANLIB="$TOOLCHAIN_DIR/bin/aarch64-none-linux-gnu-ranlib"
+  export STRIP="$TOOLCHAIN_DIR/bin/aarch64-none-linux-gnu-strip"
+  echo "Using cross-compiler: $CC"
+  $CC --version | head -1
+fi
+
 # BUILD_MODULES=false to skip module compilation (core-only build)
 if [ "${BUILD_MODULES}" != "false" ] && [ "$MAJOR" -ge 8 ] && [ -f modules/modules.yaml ]; then
   make modules-update MODULES_UPDATE_SHALLOW=1 2>&1 | tail -5
