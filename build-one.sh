@@ -100,7 +100,24 @@ for ts in 15 14 13; do
 done 2>/dev/null || true
 
 # Build
+# On el8, pkg-config may not find OpenSSL correctly
 export BUILD_TLS=yes USE_SYSTEMD=yes
+if command -v pkg-config &>/dev/null && pkg-config --exists openssl 2>/dev/null; then
+  export TLS_CFLAGS="$(pkg-config --cflags openssl)"
+  export TLS_LDFLAGS="$(pkg-config --libs openssl)"
+  echo "TLS via pkg-config: CFLAGS=$TLS_CFLAGS LDFLAGS=$TLS_LDFLAGS"
+else
+  # Fallback: check common OpenSSL locations
+  for ssl_dir in /usr /usr/local; do
+    if [ -f "$ssl_dir/include/openssl/ssl.h" ]; then
+      export OPENSSL_PREFIX="$ssl_dir"
+      export TLS_CFLAGS="-I$ssl_dir/include"
+      export TLS_LDFLAGS="-L$ssl_dir/lib64 -lssl -lcrypto"
+      echo "TLS fallback: OPENSSL_PREFIX=$OPENSSL_PREFIX"
+      break
+    fi
+  done
+fi
 if command -v clang &>/dev/null; then export LTO=1; else export LTO=0; fi
 
 if [ "$MAJOR" -ge 8 ] && [ -f modules/modules.yaml ]; then
