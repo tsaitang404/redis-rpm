@@ -1,6 +1,12 @@
 #!/bin/bash
 set -ex
 VERSION="${REDIS_VERSION:?}"
+# Normalize arch for RPM (amd64 -> x86_64, aarch64 stays)
+case "${ARCH:-$(uname -m)}" in
+  x86_64|amd64) ARCH=x86_64 ;;
+  aarch64|arm64) ARCH=aarch64 ;;
+  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+esac
 DISTTAG="${DISTTAG:-el9}"
 # Fresh copy of staging (rpmbuild wipes buildroot)
 rm -rf /tmp/staging-copy && cp -a /tmp/staging /tmp/staging-copy
