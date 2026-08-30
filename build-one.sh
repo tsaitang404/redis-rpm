@@ -128,7 +128,8 @@ else
 fi
 if command -v clang &>/dev/null; then export LTO=1; else export LTO=0; fi
 
-if [ "$MAJOR" -ge 8 ] && [ -f modules/modules.yaml ]; then
+# BUILD_MODULES=false to skip module compilation (core-only build)
+if [ "${BUILD_MODULES}" != "false" ] && [ "$MAJOR" -ge 8 ] && [ -f modules/modules.yaml ]; then
   make modules-update MODULES_UPDATE_SHALLOW=1 2>&1 | tail -5
   make -C modules install-rust INSTALL_RUST_TOOLCHAIN=yes 2>&1 | tail -5 || true
   make build -j"$(nproc)" 2>&1 || make -C src all -j"$(nproc)"
