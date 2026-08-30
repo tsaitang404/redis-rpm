@@ -5,6 +5,11 @@ on:
       release_tag:
         description: "Redis version tag (e.g. 8.10.1, 7.4.11, 6.2.24)"
         required: true
+
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   check-upstream:
     runs-on: ubuntu-latest
