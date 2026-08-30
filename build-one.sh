@@ -128,6 +128,18 @@ else
 fi
 if command -v clang &>/dev/null; then export LTO=1; else export LTO=0; fi
 
+# Cross-compilation for arm64 (skip modules, they need native build)
+if [ "$ARCH" = "aarch64" ]; then
+  echo "Cross-compiling for aarch64, skipping modules"
+  BUILD_MODULES=false
+  dnf install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu 2>/dev/null || true
+  # For el8/9, install cross-compiler from EPEL or build manual
+  if ! command -v aarch64-linux-gnu-gcc &>/dev/null; then
+    echo "Cross-compiler not available, using QEMU fallback"
+    BUILD_MODULES="${BUILD_MODULES:-auto}"
+  fi
+fi
+
 # BUILD_MODULES=false to skip module compilation (core-only build)
 if [ "${BUILD_MODULES}" != "false" ] && [ "$MAJOR" -ge 8 ] && [ -f modules/modules.yaml ]; then
   make modules-update MODULES_UPDATE_SHALLOW=1 2>&1 | tail -5

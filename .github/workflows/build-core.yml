@@ -47,11 +47,6 @@ jobs:
             arch: aarch64
     steps:
       - uses: actions/checkout@v4
-      - name: Set up QEMU
-        if: matrix.arch == 'aarch64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -65,14 +60,12 @@ jobs:
           DISTTAG: ${{ matrix.disttag }}
           BUILD_MODULES: "false"
         run: |
-          BUILDER_IMAGE="ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-${ARCH}"
-          PLATFORM_FLAG=""
-          if [ "$ARCH" = "aarch64" ]; then PLATFORM_FLAG="--platform linux/arm64"; fi
+          BUILDER_IMAGE="ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-amd64"
           docker pull "$BUILDER_IMAGE" 2>/dev/null || \
-          docker build $PLATFORM_FLAG -t "$BUILDER_IMAGE" -f dockerfiles/Dockerfile.${{ matrix.distro }}${{ matrix.version }} .
+          docker build -t "$BUILDER_IMAGE" -f dockerfiles/Dockerfile.${{ matrix.distro }}${{ matrix.version }} .
           docker push "$BUILDER_IMAGE" 2>/dev/null || true
           mkdir -p dist
-          docker run --rm $PLATFORM_FLAG \
+          docker run --rm \
             -v "$PWD:/workspace" -w /workspace \
             -e REDIS_VERSION="$REDIS_VERSION" \
             -e DISTTAG="$DISTTAG" \
@@ -104,7 +97,6 @@ jobs:
           find artifacts/ -name "*.rpm" -exec cp {} release/ \;
           ls -lh release/
           if [ -z "$(ls release/*.rpm 2>/dev/null)" ]; then echo "No RPMs!"; exit 1; fi
-          # Use tag with -core suffix for core-only release
           CORE_TAG="${TAG}-core"
           if gh release view "$CORE_TAG" --repo ${{ github.repository }} &>/dev/null; then
             gh release upload "$CORE_TAG" release/*.rpm --repo ${{ github.repository }} --clobber

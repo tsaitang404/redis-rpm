@@ -47,11 +47,6 @@ jobs:
             arch: aarch64
     steps:
       - uses: actions/checkout@v4
-      - name: Set up QEMU
-        if: matrix.arch == 'aarch64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -64,17 +59,14 @@ jobs:
           ARCH: ${{ matrix.arch }}
           DISTTAG: ${{ matrix.disttag }}
         run: |
-          BUILDER_IMAGE="ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-${ARCH}"
-          PLATFORM_FLAG=""
-          if [ "$ARCH" = "aarch64" ]; then PLATFORM_FLAG="--platform linux/arm64"; fi
-
-          # Try pulling cached image, build if not found
+          BUILDER_IMAGE="ghcr.io/${{ github.repository }}/builder:${{ matrix.distro }}${{ matrix.version }}-amd64"
+          # aarch64: cross-compile on amd64 image, skip modules
+          # amd64: native build with modules
           docker pull "$BUILDER_IMAGE" 2>/dev/null || \
-          docker build $PLATFORM_FLAG -t "$BUILDER_IMAGE" -f dockerfiles/Dockerfile.${{ matrix.distro }}${{ matrix.version }} .
+          docker build -t "$BUILDER_IMAGE" -f dockerfiles/Dockerfile.${{ matrix.distro }}${{ matrix.version }} .
           docker push "$BUILDER_IMAGE" 2>/dev/null || true
-
           mkdir -p dist
-          docker run --rm $PLATFORM_FLAG \
+          docker run --rm \
             -v "$PWD:/workspace" -w /workspace \
             -e REDIS_VERSION="$REDIS_VERSION" \
             -e DISTTAG="$DISTTAG" \
@@ -108,5 +100,5 @@ jobs:
           if gh release view "$TAG" --repo ${{ github.repository }} &>/dev/null; then
             gh release upload "$TAG" release/*.rpm --repo ${{ github.repository }} --clobber
           else
-            gh release create "$TAG" release/*.rpm --repo ${{ github.repository }} --title "Redis $TAG RPM" --generate-notes
+            gh release create "$TAG" release/*.rpm --repo ${{ github.repository}} --title "Redis $TAG RPM" --generate-notes
           fi
