@@ -6,7 +6,15 @@ on:
         description: "Redis version tag (e.g. 8.10.1, 7.4.11, 6.2.24)"
         required: true
 jobs:
-  # Pre-build Docker images (cached, only rebuild when Dockerfile changes)
+  check-upstream:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: echo "tag=${{ github.event.inputs.release_tag }}" >> $GITHUB_OUTPUT
+
   build-image:
     runs-on: ubuntu-latest
     strategy:
@@ -50,7 +58,6 @@ jobs:
         run: |
           PLATFORM_FLAG=""
           if [ "${{ matrix.arch }}" = "aarch64" ]; then PLATFORM_FLAG="--platform linux/arm64"; fi
-          # Try pulling existing image first
           if docker pull "$IMAGE" 2>/dev/null; then
             echo "Image already cached: $IMAGE"
           else
@@ -60,7 +67,7 @@ jobs:
           fi
 
   build-rpm:
-    needs: build-image
+    needs: [check-upstream, build-image]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -125,16 +132,6 @@ jobs:
         with:
           name: redis-rpm-${{ matrix.distro }}${{ matrix.version }}-${{ matrix.arch }}
           path: dist/*.rpm
-
-  check-upstream:
-    needs: build-image
-    runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.check.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: check
-        run: echo "tag=${{ github.event.inputs.release_tag }}" >> $GITHUB_OUTPUT
 
   publish:
     needs: [check-upstream, build-rpm]
