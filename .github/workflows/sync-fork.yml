@@ -12,14 +12,31 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: unstable
       - name: Sync with upstream
         run: |
+          set -euo pipefail
           git remote add upstream "https://github.com/redis/redis-rpm.git"
           git fetch upstream unstable
           git checkout unstable
-          git merge "upstream/unstable" --ff-only
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          BEFORE=$(git rev-parse HEAD)
+          if ! git merge "upstream/unstable" -m "chore: sync upstream unstable"; then
+            echo "Merge conflicts - resolving only the known intentional deletion"
+            git rm -q -f --ignore-unmatch .github/workflows/rpm.yml || true
+            if [ -n "$(git ls-files -u)" ]; then
+              echo "::error::Unresolved conflicts, manual merge required:"
+              git ls-files -u
+              exit 1
+            fi
+            git commit --no-edit
+          fi
+          if [ "$(git rev-parse HEAD)" = "$BEFORE" ]; then
+            echo "Already up to date with upstream/unstable"
+            exit 0
+          fi
           git push origin unstable
